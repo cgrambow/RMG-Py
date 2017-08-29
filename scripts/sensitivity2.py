@@ -8,11 +8,13 @@ specified in the input file) on an RMG job with extra functionality.
 
 import os.path
 import argparse
+import csv
 import glob
 import re
 
 from rmgpy.tools.simulate import run_simulation
 from rmgpy.tools.plot import parseCSVData
+from rmgpy.chemkin import getSpeciesIdentifier
 
 
 ################################################################################
@@ -45,26 +47,54 @@ def main():
     rmg = run_simulation(inputFile, chemkinFile, dictFile, diffusionLimited=dflag, checkDuplicates=checkDuplicates)
 
     # Loop through all RMG simulation output files
-    for simcsv in glob.glob(os.path.join(rmg.outputDirectory, 'simulation*.csv')):
+    for simcsv in glob.glob(os.path.join(rmg.outputDirectory, 'solver', 'simulation*.csv')):
         rxnSysIndex = re.search(r'\d+', os.path.basename(simcsv)).group()
         time, dataList = parseCSVData(simcsv)
-        speciesList = rmg.reactionModel.core.species[:]
+        speciesList = rmg.reactionModel.core.species
+        newDataList = []
 
         # Convert species names in dataList to species objects because species
         # names in csv file are uninformative without corresponding mechanism
         # file.
         for data in dataList:
             for i, s in enumerate(speciesList):
-                if data.label == s.label:
-                    data.species = s.pop[i]
+                if data.label == getSpeciesIdentifier(s):
+                    data.species = s
                     break
+            if data.species is not None and data.species != 'Volume':
+                newDataList.append(data)
 
-        writeMolFracs(time, dataList)
-        writeThermo(time, dataList)
-        writeElementalComposition(time, dataList)
+        writeMolFracs(rmg, rxnSysIndex, time, newDataList)
+        writeElementalComposition(time, newDataList)
 
-def writeMolFracs(time, dataList):
-    pass
+def writeMolFracs(rmg, rxnSysIndex, time, dataList):
+    """
+    Output a csv file where the first three rows are SMILES, molecular weights,
+    and number of radical electrons of the species in an RMG model. After that,
+    the columns contain time and species mole fractions.
+    """
+    smiles = ['SMILES']
+    exactMass = ['exact_mass']
+    numRadElectrons = ['num_rad_electrons']
+
+    for data in dataList:
+        mol = data.species.molecule[0]
+        smiles.append(mol.toSMILES())
+        exactMass.append(mol.getMolecularWeight() * 1000.0)
+        numRadElectrons.append(mol.getRadicalCount())
+
+    path = os.path.join(rmg.outputDirectory, 'solver', 'out_data_{}_species_X.csv'.format(rxnSysIndex))
+    with open(path, 'w') as f:
+        writer = csv.writer(f, delimiter='|', quoting=csv.QUOTE_NONE)
+
+        writer.writerow(smiles)
+        writer.writerow(exactMass)
+        writer.writerow(numRadElectrons)
+
+        for i, t in enumerate(time.data):
+            row = [t]
+            row.extend(data.data[i] for data in dataList)
+            writer.writerow(row)
 
 def writeThermo(time, dataList):
     pass
