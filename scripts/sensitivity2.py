@@ -93,8 +93,11 @@ def writeMolFracs(rmg, rxnSysIndex, time, dataList):
             row.extend(data.data[i] for data in dataList)
             writer.writerow(row)
 
-def writeThermo(time, dataList):
-    pass
+def writeThermo():
+    """
+    Not yet implemented because it may not be necessary.
+    """
+    raise NotImplementedError
 
 def writeElementalComposition(time, dataList):
     pass
