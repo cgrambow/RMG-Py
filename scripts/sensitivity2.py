@@ -8,8 +8,11 @@ functionality.
 
 import os.path
 import argparse
+import glob
+import re
 
 from rmgpy.tools.sensitivity import runSensitivity
+from rmgpy.tools.plot import parseCSVData
 
 
 ################################################################################
@@ -38,6 +41,33 @@ def main():
     inputFile, chemkinFile, dictFile, dflag = parse_arguments()
     rmg = runSensitivity(inputFile, chemkinFile, dictFile, dflag)
 
+    # Loop through all RMG simulation output files
+    for simcsv in glob.glob(os.path.join(rmg.outputDirectory, 'simulation*.csv')):
+        rxnSysIndex = re.search(r'\d+', os.path.basename(simcsv)).group()
+        time, dataList = parseCSVData(simcsv)
+        speciesList = rmg.reactionModel.core.species[:]
+
+        # Convert species names in dataList to species objects because species
+        # names in csv file are uninformative without corresponding mechanism
+        # file.
+        for data in dataList:
+            for i, s in enumerate(speciesList):
+                if data.label == s.label:
+                    data.species = s.pop[i]
+                    break
+
+        writeMolFracs(time, dataList)
+        writeThermo(time, dataList)
+        writeElementalComposition(time, dataList)
+
+def writeMolFracs(time, dataList):
+    pass
+
+def writeThermo(time, dataList):
+    pass
+
+def writeElementalComposition(time, dataList):
+    pass
 
 ################################################################################
 
