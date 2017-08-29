@@ -155,3 +155,5 @@ def run_simulation(inputFile, chemkinFile, dictFile, diffusionLimited=True, chec
     end_time = time()
     time_taken = end_time - start_time
     print "Simulation took {0} seconds".format(time_taken)
+
+    return rmg
