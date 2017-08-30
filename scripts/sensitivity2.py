@@ -6,6 +6,8 @@ This script runs stand-alone sensitivity analysis on an RMG job with extra
 functionality.
 """
 
+from __future__ import division
+
 import os.path
 import argparse
 import csv
@@ -15,6 +17,7 @@ import re
 from rmgpy.tools.sensitivity import runSensitivity
 from rmgpy.tools.plot import parseCSVData
 from rmgpy.chemkin import getSpeciesIdentifier
+from rmgpy.solver.liquid import LiquidReactor
 
 
 ################################################################################
@@ -45,7 +48,7 @@ def main():
 
     # Loop through all RMG simulation output files
     for simcsv in glob.glob(os.path.join(rmg.outputDirectory, 'solver', 'simulation*.csv')):
-        rxnSysIndex = re.search(r'\d+', os.path.basename(simcsv)).group()
+        rxnSysIndex = int(re.search(r'\d+', os.path.basename(simcsv)).group()) - 1
         time, dataList = parseCSVData(simcsv)
         speciesList = rmg.reactionModel.core.species
         newDataList = []
@@ -62,7 +65,7 @@ def main():
                 newDataList.append(data)
 
         writeMolFracs(rmg, rxnSysIndex, time, newDataList)
-        writeElementalComposition(time, newDataList)
+        writeElementalComposition(rmg, rxnSysIndex, time, newDataList)
 
 def writeMolFracs(rmg, rxnSysIndex, time, dataList):
     """
@@ -80,7 +83,7 @@ def writeMolFracs(rmg, rxnSysIndex, time, dataList):
         exactMass.append(mol.getMolecularWeight() * 1000.0)
         numRadElectrons.append(mol.getRadicalCount())
 
-    path = os.path.join(rmg.outputDirectory, 'solver', 'out_data_{}_species_X.csv'.format(rxnSysIndex))
+    path = os.path.join(rmg.outputDirectory, 'solver', 'out_data_{}_species_X.csv'.format(rxnSysIndex + 1))
     with open(path, 'w') as f:
         writer = csv.writer(f, delimiter='|', quoting=csv.QUOTE_NONE)
 
@@ -99,8 +102,59 @@ def writeThermo():
     """
     raise NotImplementedError
 
-def writeElementalComposition(time, dataList):
-    pass
+def writeElementalComposition(rmg, rxnSysIndex, time, dataList):
+    """
+    Output two csv files, one with elemental mole fractions of C, H, and O, and
+    one with corresponding mass fractions.
+    """
+    # Remove constant species, because they would falsify results.
+    reactionSystem = rmg.reactionSystems[rxnSysIndex]
+    if isinstance(reactionSystem, LiquidReactor):
+        newDataList = [d for i, d in enumerate(dataList) if i not in reactionSystem.constSPCIndices]
+    else:
+        newDataList = dataList
+
+    # Extract molecules and set atomic weights
+    mols = [d.species.molecule[0] for d in newDataList]
+    atomicWeights = {'C': 12.0107, 'H': 1.00794, 'O': 15.9994}  # g/mol
+
+    pathMol = os.path.join(rmg.outputDirectory, 'solver', 'out_data_{}_elemental_mol.csv'.format(rxnSysIndex + 1))
+    pathMass = os.path.join(rmg.outputDirectory, 'solver', 'out_data_{}_elemental_mass.csv'.format(rxnSysIndex + 1))
+    with open(pathMol, 'w') as fMol, open(pathMass, 'w') as fMass:
+        header = ['t', 'C', 'H', 'O']
+        writerMol = csv.writer(fMol, delimiter='|', quoting=csv.QUOTE_NONE)
+        writerMass = csv.writer(fMass, delimiter='|', quoting=csv.QUOTE_NONE)
+
+        writerMol.writerow(header)
+        writerMass.writerow(header)
+
+        # Calculate elemental mole and mass fraction at each time step
+        for i, t in enumerate(time.data):
+            molFracs = [d.data[i] for d in newDataList]
+            elMolFrac, elMassFrac = calculateElementalComposition(molFracs, mols, atomicWeights)
+
+            rowMol = [t, elMolFrac['C'], elMolFrac['H'], elMolFrac['O']]
+            rowMass = [t, elMassFrac['C'], elMassFrac['H'], elMassFrac['O']]
+
+            writerMol.writerow(rowMol)
+            writerMass.writerow(rowMass)
+
+def calculateElementalComposition(molFracs, mols, atomicWeights):
+    """
+    Calculate elemental mole and mass fractions for all atoms in the
+    atomicWeights dictionary from a list of molecular mole fractions and the
+    corresponding molecule objects.
+    """
+    num = {a: sum(m.getNumAtoms(element=a) * mf for m, mf in zip(mols, molFracs))
+           for a in atomicWeights}
+    denomMol = sum(m.getNumAtoms(element=a) * mf for m, mf in zip(mols, molFracs)
+                   for a in atomicWeights)
+    denomMass = sum(m.getMolecularWeight() * 1000.0 * mf for m, mf in zip(mols, molFracs))
+
+    elMolFrac = {a: num[a] / denomMol for a in atomicWeights}
+    elMassFrac = {a: w * num[a] / denomMass for a, w in atomicWeights.iteritems()}
+
+    return elMolFrac, elMassFrac
 
 ################################################################################
 
