@@ -1788,7 +1788,7 @@ class KineticsFamily(Database):
                     pairs.append([reaction.reactants[1],reaction.products[0]])
                 else:
                     error = True
-        elif self.label.lower() in ['disproportionation', 'co_disproportionation', 'korcek_step1_cat']:
+        elif self.label.lower() in ['disproportionation', 'co_disproportionation', 'korcek_step1_cat', 'baeyer_villiger']:
             # Hardcoding for disproportionation and co_disproportionation: pair
             # the reactant containing *1 with the product containing *1
             assert len(reaction.reactants) == len(reaction.products) == 2
