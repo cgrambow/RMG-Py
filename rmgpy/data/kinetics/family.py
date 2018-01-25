@@ -1180,6 +1180,21 @@ class KineticsFamily(Database):
                     atom.label = '*' + str(identicalCenterCounter)
             if identicalCenterCounter != 2:
                 raise KineticsError('Unable to change labels from "*" to "*1" and "*2" for reaction family {0}.'.format(label))
+        # Hardcoding of reaction family for tertiary peroxyl disproportionation
+        # *1 and *2 have to be changed to *3 and *4 for the second reactant
+        elif label == 'tert_peroxyl_disproportionation' and forward:
+            identicalCenterCounter1 = identicalCenterCounter2 = 0
+            for atom in reactantStructure.atoms:
+                if atom.label == '*1':
+                    identicalCenterCounter1 += 1
+                    if identicalCenterCounter1 > 1:
+                        atom.label = '*3'
+                elif atom.label == '*2':
+                    identicalCenterCounter2 += 1
+                    if identicalCenterCounter2 > 1:
+                        atom.label = '*4'
+            if identicalCenterCounter1 != 2 or identicalCenterCounter2 != 2:
+                raise KineticsError('Unable to change labels from "*1" and "*2" to "*3" and "*4" for reaction family {0}.'.format(label))
 
         # Generate the product structure by applying the recipe
         if forward:
