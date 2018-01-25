@@ -147,7 +147,7 @@ class KineticsGroups(Database):
 
         # Get fresh templates (with duplicate nodes back in)
         forwardTemplate = self.top[:]
-        if self.label.lower().startswith('r_recombination'):
+        if self.label.lower().startswith('r_recombination') or self.label.lower().startswith('tert_peroxyl_disproportionation'):
             forwardTemplate.append(forwardTemplate[0])
 
         # Check that we were able to match the template.
