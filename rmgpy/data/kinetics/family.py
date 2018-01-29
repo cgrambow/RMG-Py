@@ -1180,6 +1180,35 @@ class KineticsFamily(Database):
                     atom.label = '*' + str(identicalCenterCounter)
             if identicalCenterCounter != 2:
                 raise KineticsError('Unable to change labels from "*" to "*1" and "*2" for reaction family {0}.'.format(label))
+        # Hardcoding of reaction family for primary/secondary peroxyl disproportionation
+        # *2 and *3 have to be changed to *5 and *6 for the second reactant
+        # and *1 and *4 have to be removed
+        elif label == 'prisec_peroxyl_disproportionation' and forward:
+            identicalCenterCounter1 = identicalCenterCounter2 = identicalCenterCounter3 = identicalCenterCounter4 = 0
+            for atom in reactantStructure.atoms:
+                if atom.label == '*1':
+                    identicalCenterCounter1 += 1
+                    if identicalCenterCounter1 > 1:
+                        atom.label = ''
+                elif atom.label == '*2':
+                    identicalCenterCounter2 += 1
+                    if identicalCenterCounter2 > 1:
+                        atom.label = '*5'
+                elif atom.label == '*3':
+                    identicalCenterCounter3 += 1
+                    if identicalCenterCounter3 > 1:
+                        atom.label = '*6'
+                elif atom.label == '*4':
+                    identicalCenterCounter4 += 1
+                    if identicalCenterCounter4 > 1:
+                        atom.label = ''
+            msg = ''
+            if identicalCenterCounter1 != 2 or identicalCenterCounter4 != 2:
+                msg += 'Unable to remove labels "*1" and "*4" for reaction family {0}. '.format(label)
+            if identicalCenterCounter2 !=2 or identicalCenterCounter3 != 2:
+                msg += 'Unable to change labels "*2" and "*3" to "*5" and "*6" for reaction family {0}.'.format(label)
+            if msg:
+                raise KineticsError(msg)
         # Hardcoding of reaction family for tertiary peroxyl disproportionation
         # *1 and *2 have to be changed to *3 and *4 for the second reactant
         elif label == 'tert_peroxyl_disproportionation' and forward:
