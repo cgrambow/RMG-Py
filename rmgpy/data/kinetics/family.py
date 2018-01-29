@@ -1224,6 +1224,31 @@ class KineticsFamily(Database):
                         atom.label = '*4'
             if identicalCenterCounter1 != 2 or identicalCenterCounter2 != 2:
                 raise KineticsError('Unable to change labels from "*1" and "*2" to "*3" and "*4" for reaction family {0}.'.format(label))
+        # Hardcoding of reaction family for bimolecular hydroperoxide decomposition
+        # *1 has to be removed and *2 has to be changed to *4 for the second reactant
+        # and *3 has to be removed for the first reactant
+        elif label == 'bimolec_hydroperoxide_decomposition' and forward:
+            identicalCenterCounter1 = identicalCenterCounter2 = identicalCenterCounter3 = 0
+            for atom in reactantStructure.atoms:
+                if atom.label == '*1':
+                    identicalCenterCounter1 += 1
+                    if identicalCenterCounter1 > 1:
+                        atom.label = ''
+                elif atom.label == '*2':
+                    identicalCenterCounter2 += 1
+                    if identicalCenterCounter2 > 1:
+                        atom.label = '*4'
+                elif atom.label == '*3':
+                    identicalCenterCounter3 += 1
+                    if identicalCenterCounter3 == 1:
+                        atom.label = ''
+            msg = ''
+            if identicalCenterCounter1 != 2 or identicalCenterCounter2 != 2:
+                msg += 'Unable to remove label "*1" and change label "*2" to "*4" for reaction family {0}. '.format(label)
+            if identicalCenterCounter3 != 2:
+                msg += 'Unable to remove label "*3" for reaction family {0}.'.format(label)
+            if msg:
+                raise KineticsError(msg)
 
         # Generate the product structure by applying the recipe
         if forward:
