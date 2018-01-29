@@ -149,7 +149,8 @@ class KineticsGroups(Database):
         forwardTemplate = self.top[:]
         if (self.label.lower().startswith('r_recombination')
             or self.label.lower().startswith('prisec_peroxyl_disproportionation')
-            or self.label.lower().startswith('tert_peroxyl_disproportionation')):
+            or self.label.lower().startswith('tert_peroxyl_disproportionation')
+            or self.label.lower().startswith('bimolec_hydroperoxide_decomposition')):
             forwardTemplate.append(forwardTemplate[0])
 
         # Check that we were able to match the template.
