@@ -73,7 +73,7 @@ finalPadding = 5                # The number of seconds to display the final flu
 
 ################################################################################
 
-def generateFluxDiagram(reactionModel, times, concentrations, reactionRates, outputDirectory, centralSpecies=None, speciesDirectory=None, settings=None):
+def generateFluxDiagram(reactionModel, times, concentrations, reactionRates, outputDirectory, centralSpeciesList=None, speciesDirectory=None, settings=None):
     """
     For a given `reactionModel` and simulation results stored as arrays of
     `times`, species `concentrations`, and `reactionRates`, generate a series
@@ -95,14 +95,17 @@ def generateFluxDiagram(reactionModel, times, concentrations, reactionRates, out
     speciesList = reactionModel.core.species[:]
     numSpecies = len(speciesList)
     reactionList = reactionModel.core.reactions[:]
-    numReactions = len(reactionList)
     
-    #search index of central species:
-    if centralSpecies is not None:
-        for i, species in enumerate(speciesList):
-            if species.label == centralSpecies:
-                centralSpeciesIndex = i
-                break 
+    # Search for indices of central species
+    centralSpeciesIndices = []
+    if centralSpeciesList is not None:
+        for centralSpecies in centralSpeciesList:
+            for i, species in enumerate(speciesList):
+                if species.index == centralSpecies:
+                    centralSpeciesIndices.append(i)
+                    break
+            else:
+                raise Exception("Central species '{}' could not be found in species list.".format(centralSpecies))
     
     # Compute the rates between each pair of species (big matrix warning!)
     speciesRates = numpy.zeros((len(times),numSpecies,numSpecies), numpy.float64)
@@ -126,7 +129,7 @@ def generateFluxDiagram(reactionModel, times, concentrations, reactionRates, out
     
     # Determine the nodes and edges to keep
     nodes = []; edges = []
-    if centralSpecies is None:
+    if centralSpeciesList is None:
         for i in range(numSpecies*numSpecies):
             productIndex, reactantIndex = divmod(speciesIndex[-i-1], numSpecies)
             if reactantIndex > productIndex:
@@ -143,23 +146,28 @@ def generateFluxDiagram(reactionModel, times, concentrations, reactionRates, out
             if len(edges) >= maximumEdgeCount:
                 break
     else:
-        nodes.append(centralSpeciesIndex)
-        for index, reaction in enumerate(reactionList):
-            for reactant, product in reaction.pairs:
-                reactantIndex = speciesList.index(reactant)
-                productIndex = speciesList.index(product)
-                if maxSpeciesRates[reactantIndex, productIndex] == 0:
-                    break
-                if len(nodes) > maximumNodeCount or len(edges) >= maximumEdgeCount: 
-                    break
-                if reactantIndex == centralSpeciesIndex: 
-                    if productIndex not in nodes:
-                        nodes.append(productIndex)
-                        edges.append([reactantIndex, productIndex])
-                if productIndex == centralSpeciesIndex: 
-                    if reactantIndex not in nodes:
-                        nodes.append(reactantIndex)
-                        edges.append([reactantIndex, productIndex])
+        for centralSpeciesIndex in centralSpeciesIndices:
+            nodes.append(centralSpeciesIndex)
+            for index, reaction in enumerate(reactionList):
+                for reactant, product in reaction.pairs:
+                    reactantIndex = speciesList.index(reactant)
+                    productIndex = speciesList.index(product)
+                    if maxSpeciesRates[reactantIndex, productIndex] == 0:
+                        break
+                    if len(nodes) > maximumNodeCount or len(edges) >= maximumEdgeCount:
+                        break
+                    if reactantIndex == centralSpeciesIndex:
+                        if productIndex not in nodes:
+                            nodes.append(productIndex)
+                            edges.append([reactantIndex, productIndex])
+                        elif [reactantIndex, productIndex] not in edges and [productIndex, reactantIndex] not in edges:
+                            edges.append([reactantIndex, productIndex])
+                    if productIndex == centralSpeciesIndex:
+                        if reactantIndex not in nodes:
+                            nodes.append(reactantIndex)
+                            edges.append([reactantIndex, productIndex])
+                        elif [reactantIndex, productIndex] not in edges and [productIndex, reactantIndex] not in edges:
+                            edges.append([reactantIndex, productIndex])
     # Create the master graph
     # First we're going to generate the coordinates for all of the nodes; for
     # this we use the thickest pen widths for all nodes and edges 
@@ -435,7 +443,7 @@ def loadChemkinOutput(outputFile, reactionModel):
 ################################################################################
 
 def createFluxDiagram(inputFile, chemkinFile, speciesDict, savePath=None, speciesPath=None, java=False, settings=None,
-                      chemkinOutput='', centralSpecies=None, diffusionLimited=True):
+                      chemkinOutput='', centralSpeciesList=None, diffusionLimited=True):
     """
     Generates the flux diagram based on a condition 'inputFile', chemkin.inp chemkinFile,
     a speciesDict txt file, plus an optional chemkinOutput file.
@@ -464,7 +472,7 @@ def createFluxDiagram(inputFile, chemkinFile, speciesDict, savePath=None, specie
         time, coreSpeciesConcentrations, coreReactionRates = loadChemkinOutput(chemkinOutput, rmg.reactionModel)
 
         print 'Generating flux diagram for chemkin output...'
-        generateFluxDiagram(rmg.reactionModel, time, coreSpeciesConcentrations, coreReactionRates, outDir, centralSpecies, speciesPath, settings)
+        generateFluxDiagram(rmg.reactionModel, time, coreSpeciesConcentrations, coreReactionRates, outDir, centralSpeciesList, speciesPath, settings)
 
     else:
         # Generate a flux diagram video for each reaction system
@@ -492,4 +500,4 @@ def createFluxDiagram(inputFile, chemkinFile, speciesDict, savePath=None, specie
 
             print 'Generating flux diagram for reaction system {0:d}...'.format(index+1)
             generateFluxDiagram(rmg.reactionModel, time, coreSpeciesConcentrations, coreReactionRates, outDir,
-                                centralSpecies, speciesPath, settings)
+                                centralSpeciesList, speciesPath, settings)
