@@ -77,18 +77,20 @@ def parse_arguments():
     useJava = args.java
     dflag = args.dlim
     centralSpeciesList = args.centralSpecies
+    superimpose = args.super
 
-    keys = ('maximumNodeCount', 'maximumEdgeCount', 'concentrationTolerance', 'speciesRateTolerance', 'timeStep')
-    vals = (args.maxnode, args.maxedge, args.conctol, args.ratetol, args.tstep)
+    keys = ('maximumNodeCount', 'maximumEdgeCount', 'concentrationTolerance', 'speciesRateTolerance', 'radius', 'timeStep')
+    vals = (args.maxnode, args.maxedge, args.conctol, args.ratetol, args.rad, args.tstep)
     settings = {k: v for k, v in zip(keys, vals) if v is not None}
     
-    return inputFile, chemkinFile, dictFile, speciesPath, chemkinOutput, useJava, dflag, settings, centralSpeciesList
+    return inputFile, chemkinFile, dictFile, speciesPath, chemkinOutput, useJava, dflag, settings, centralSpeciesList, superimpose
 
 def main():
-    inputFile, chemkinFile, dictFile, speciesPath, chemkinOutput, useJava, dflag, settings, centralSpeciesList = parse_arguments()
+    inputFile, chemkinFile, dictFile, speciesPath, chemkinOutput, useJava, dflag, settings, centralSpeciesList, superimpose = parse_arguments()
 
     createFluxDiagram(inputFile, chemkinFile, dictFile, speciesPath=speciesPath, java=useJava, settings=settings,
-                      chemkinOutput=chemkinOutput, diffusionLimited=dflag, centralSpeciesList=centralSpeciesList)
+                      chemkinOutput=chemkinOutput, diffusionLimited=dflag, centralSpeciesList=centralSpeciesList,
+                      superimpose=superimpose)
 
 if __name__ == '__main__':
     main()
