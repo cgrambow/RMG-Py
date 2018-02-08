@@ -66,6 +66,8 @@ def parse_arguments():
     parser.add_argument('--rad', metavar='R', type=int, help='Graph radius around a central species')
     parser.add_argument('--super', action='store_true', help='Superimpose central species onto normal flux diagram to'
                                                              ' ensure that they appear in diagram')
+    parser.add_argument('--saveStates', action='store_true', help='Save simulation states to disk')
+    parser.add_argument('--readStates', action='store_true', help='Read simulation states from disk')
 
     args = parser.parse_args()
 
@@ -78,19 +80,43 @@ def parse_arguments():
     dflag = args.dlim
     centralSpeciesList = args.centralSpecies
     superimpose = args.super
+    saveStates = args.saveStates
+    readStates = args.readStates
 
     keys = ('maximumNodeCount', 'maximumEdgeCount', 'concentrationTolerance', 'speciesRateTolerance', 'radius', 'timeStep')
     vals = (args.maxnode, args.maxedge, args.conctol, args.ratetol, args.rad, args.tstep)
     settings = {k: v for k, v in zip(keys, vals) if v is not None}
     
-    return inputFile, chemkinFile, dictFile, speciesPath, chemkinOutput, useJava, dflag, settings, centralSpeciesList, superimpose
+    return (inputFile,
+            chemkinFile,
+            dictFile,
+            speciesPath,
+            chemkinOutput,
+            useJava,
+            dflag,
+            settings,
+            centralSpeciesList,
+            superimpose,
+            saveStates,
+            readStates)
 
 def main():
-    inputFile, chemkinFile, dictFile, speciesPath, chemkinOutput, useJava, dflag, settings, centralSpeciesList, superimpose = parse_arguments()
+    (inputFile,
+     chemkinFile,
+     dictFile,
+     speciesPath,
+     chemkinOutput,
+     useJava,
+     dflag,
+     settings,
+     centralSpeciesList,
+     superimpose,
+     saveStates,
+     readStates) = parse_arguments()
 
     createFluxDiagram(inputFile, chemkinFile, dictFile, speciesPath=speciesPath, java=useJava, settings=settings,
                       chemkinOutput=chemkinOutput, diffusionLimited=dflag, centralSpeciesList=centralSpeciesList,
-                      superimpose=superimpose)
+                      superimpose=superimpose, saveStates=saveStates, readStates=readStates)
 
 if __name__ == '__main__':
     main()
