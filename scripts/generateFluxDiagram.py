@@ -64,6 +64,8 @@ def parse_arguments():
     parser.add_argument('--centralSpecies', metavar='s1,s2,...', type=lambda s: [int(idx) for idx in s.split(',')],
                         help='List of indices of central species')
     parser.add_argument('--rad', metavar='R', type=int, help='Graph radius around a central species')
+    parser.add_argument('--centralReactionCount', metavar='N', type=int, help='Maximum number of reactions to show from'
+                                                                              ' each central species (default = all)')
     parser.add_argument('--super', action='store_true', help='Superimpose central species onto normal flux diagram to'
                                                              ' ensure that they appear in diagram')
     parser.add_argument('--saveStates', action='store_true', help='Save simulation states to disk')
@@ -83,8 +85,14 @@ def parse_arguments():
     saveStates = args.saveStates
     readStates = args.readStates
 
-    keys = ('maximumNodeCount', 'maximumEdgeCount', 'concentrationTolerance', 'speciesRateTolerance', 'radius', 'timeStep')
-    vals = (args.maxnode, args.maxedge, args.conctol, args.ratetol, args.rad, args.tstep)
+    keys = ('maximumNodeCount',
+            'maximumEdgeCount',
+            'concentrationTolerance',
+            'speciesRateTolerance',
+            'radius',
+            'centralReactionCount',
+            'timeStep')
+    vals = (args.maxnode, args.maxedge, args.conctol, args.ratetol, args.rad, args.centralReactionCount, args.tstep)
     settings = {k: v for k, v in zip(keys, vals) if v is not None}
     
     return (inputFile,
