@@ -121,7 +121,7 @@ def loadRMGPyJob(inputFile, chemkinFile=None, speciesDict=None, generateImages=T
     
     return rmg
 
-def loadRMGJavaJob(inputFile, chemkinFile=None, speciesDict=None, useChemkinNames=False):
+def loadRMGJavaJob(inputFile, chemkinFile=None, speciesDict=None, generateImages=True, useChemkinNames=False):
     """
     Load the results of an RMG-Java job generated from the given `inputFile`.
     """
@@ -178,15 +178,16 @@ def loadRMGJavaJob(inputFile, chemkinFile=None, speciesDict=None, useChemkinName
     rmg.reactionModel.core.reactions = reactionList
     
     # RMG-Java doesn't generate species images, so draw them ourselves now
-    speciesPath = os.path.join(os.path.dirname(inputFile), 'species')
-    try:
-        os.mkdir(speciesPath)
-    except OSError:
-        pass
-    for species in speciesList:
-
-        path = os.path.join(speciesPath + '/{0!s}.png'.format(species))
-        species.molecule[0].draw(str(path))
+    if generateImages:
+        speciesPath = os.path.join(os.path.dirname(inputFile), 'species')
+        try:
+            os.mkdir(speciesPath)
+        except OSError:
+            pass
+        for species in speciesList:
+            path = os.path.join(speciesPath + '/{0!s}.png'.format(species))
+            if not os.path.exists(path):
+                species.molecule[0].draw(str(path))
     
     return rmg
 
