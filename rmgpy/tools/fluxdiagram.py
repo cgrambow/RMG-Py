@@ -525,7 +525,7 @@ def loadChemkinOutput(outputFile, reactionModel):
 
 def createFluxDiagram(inputFile, chemkinFile, speciesDict, savePath=None, speciesPath=None, java=False, settings=None,
                       chemkinOutput='', centralSpeciesList=None, superimpose=False, saveStates=False,
-                      readStates=False, diffusionLimited=True):
+                      readStates=False, diffusionLimited=True, checkDuplicates=True):
     """
     Generates the flux diagram based on a condition 'inputFile', chemkin.inp chemkinFile,
     a speciesDict txt file, plus an optional chemkinOutput file.
@@ -538,7 +538,8 @@ def createFluxDiagram(inputFile, chemkinFile, speciesDict, savePath=None, specie
         generateImages = False
 
     print 'Loading RMG job...'
-    rmg = loadRMGJob(inputFile, chemkinFile, speciesDict, generateImages=generateImages, useJava=java)
+    rmg = loadRMGJob(inputFile, chemkinFile, speciesDict,
+                     generateImages=generateImages, useJava=java, checkDuplicates=checkDuplicates)
 
     if savePath is None:
         savePath = os.path.join(rmg.outputDirectory, 'flux')

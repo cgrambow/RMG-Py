@@ -55,6 +55,8 @@ def parse_arguments():
                         help='Chemkin output file')
     parser.add_argument('--java', action='store_true', help='process RMG-Java model')
     parser.add_argument('--no-dlim', dest='dlim', action='store_false', help='Turn off diffusion-limited rates')
+    parser.add_argument('--no-dupcheck', dest='checkDuplicates', action='store_false',
+                        help='Turn off duplicate checking when loading Chemkin file')
     parser.add_argument('-n', '--maxnode', metavar='N', type=int, help='Maximum number of nodes to show in diagram')
     parser.add_argument('-e', '--maxedge', metavar='N', type=int, help='Maximum number of edges to show in diagram')
     parser.add_argument('-c', '--conctol', metavar='TOL', type=float, help='Lowest fractional concentration to show')
@@ -86,6 +88,7 @@ def parse_arguments():
     superimpose = args.super
     saveStates = args.saveStates
     readStates = args.readStates
+    checkDuplicates = args.checkDuplicates
 
     keys = ('maximumNodeCount',
             'maximumEdgeCount',
@@ -108,7 +111,8 @@ def parse_arguments():
             centralSpeciesList,
             superimpose,
             saveStates,
-            readStates)
+            readStates,
+            checkDuplicates)
 
 def main():
     (inputFile,
@@ -122,11 +126,14 @@ def main():
      centralSpeciesList,
      superimpose,
      saveStates,
-     readStates) = parse_arguments()
+     readStates,
+     checkDuplicates) = parse_arguments()
 
     createFluxDiagram(inputFile, chemkinFile, dictFile, speciesPath=speciesPath, java=useJava, settings=settings,
                       chemkinOutput=chemkinOutput, diffusionLimited=dflag, centralSpeciesList=centralSpeciesList,
-                      superimpose=superimpose, saveStates=saveStates, readStates=readStates)
+                      superimpose=superimpose, saveStates=saveStates, readStates=readStates,
+                      checkDuplicates=checkDuplicates)
+
 
 if __name__ == '__main__':
     main()

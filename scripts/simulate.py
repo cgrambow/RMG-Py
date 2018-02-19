@@ -51,19 +51,22 @@ def parse_arguments():
         help='RMG dictionary file')
     parser.add_argument('--no-dlim', dest='dlim', action='store_false',
         help='Turn off diffusion-limited rates for LiquidReactor')
+    parser.add_argument('--no-dupcheck', dest='checkDuplicates', action='store_false',
+        help='Turn off duplicate checking when loading Chemkin file')
     args = parser.parse_args()
     
     inputFile = os.path.abspath(args.input[0])
     chemkinFile = os.path.abspath(args.chemkin[0])
     dictFile = os.path.abspath(args.dictionary[0])
     dflag = args.dlim
+    checkDuplicates = args.checkDuplicates
 
-    return inputFile, chemkinFile, dictFile, dflag
+    return inputFile, chemkinFile, dictFile, dflag, checkDuplicates
 
 def main():
-    inputFile, chemkinFile, dictFile, dflag = parse_arguments()
+    inputFile, chemkinFile, dictFile, dflag, checkDuplicates = parse_arguments()
 
-    run_simulation(inputFile, chemkinFile, dictFile, dflag)
+    run_simulation(inputFile, chemkinFile, dictFile, diffusionLimited=dflag, checkDuplicates=checkDuplicates)
 
 ################################################################################
 
