@@ -1175,30 +1175,32 @@ def _isomorphicSpeciesList(list1, list2, checkIdentical=False, checkOnlyLabel = 
                     and comparison_method(list1[1], list2[0]):
             return True
     elif len(list1) == len(list2) == 3:
-        if (    comparison_method(list1[0], list2[0]) and
-                comparison_method(list1[1], list2[1]) and
-                comparison_method(list1[2], list2[2]) ):
+        same_00 = comparison_method(list1[0], list2[0])
+        same_11 = comparison_method(list1[1], list2[1])
+        same_22 = comparison_method(list1[2], list2[2])
+        if same_00 and same_11 and same_22:
             return True
-        elif (  comparison_method(list1[0], list2[0]) and
-                comparison_method(list1[1], list2[2]) and
-                comparison_method(list1[2], list2[1]) ):
-            return True
-        elif (  comparison_method(list1[0], list2[1]) and
-                comparison_method(list1[1], list2[0]) and
-                comparison_method(list1[2], list2[2]) ):
-            return True
-        elif (  comparison_method(list1[0], list2[2]) and
-                comparison_method(list1[1], list2[0]) and
-                comparison_method(list1[2], list2[1]) ):
-            return True
-        elif (  comparison_method(list1[0], list2[1]) and
-                comparison_method(list1[1], list2[2]) and
-                comparison_method(list1[2], list2[0]) ):
-            return True
-        elif (  comparison_method(list1[0], list2[2]) and
-                comparison_method(list1[1], list2[1]) and
-                comparison_method(list1[2], list2[0]) ):
-            return True
+        else:
+            same_12 = comparison_method(list1[1], list2[2])
+            same_21 = comparison_method(list1[2], list2[1])
+            if same_00 and same_12 and same_21:
+                return True
+            else:
+                same_01 = comparison_method(list1[0], list2[1])
+                same_10 = comparison_method(list1[1], list2[0])
+                if same_01 and same_10 and same_22:
+                    return True
+                else:
+                    same_20 = comparison_method(list1[2], list2[0])
+                    if same_01 and same_12 and same_20:
+                        return True
+                    else:
+                        same_02 = comparison_method(list1[0], list2[2])
+                        if same_02 and same_10 and same_21:
+                            return True
+                        else:
+                            if same_02 and same_11 and same_20:
+                                return True
     elif len(list1) == len(list2):
         raise NotImplementedError("Can't check isomorphism of lists with {0} species/molecules".format(len(list1)))
     # nothing found
