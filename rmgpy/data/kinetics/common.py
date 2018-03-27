@@ -224,8 +224,10 @@ def generate_molecule_combos(input_species):
         combos = [(mol,) for mol in input_species[0].molecule]
     elif len(input_species) == 2:
         combos = itertools.product(input_species[0].molecule, input_species[1].molecule)
+    elif len(input_species) == 3:
+        combos = itertools.product(input_species[0].molecule, input_species[1].molecule, input_species[2].molecule)
     else:
-        raise ValueError('Reaction generation can be done for 1 or 2 species, not {0}.'.format(len(input_species)))
+        raise ValueError('Reaction generation can be done for 1, 2, or 3 species, not {0}.'.format(len(input_species)))
 
     return combos
 
@@ -364,5 +366,36 @@ def reduce_same_reactant_degeneracy(reaction, same_reactants=None):
                 reaction.reactants[0].isIsomorphic(reaction.reactants[1])
             ):
         reaction.degeneracy *= 0.5
-        logging.debug('Degeneracy of reaction {} was decreased by 50% to {} since the reactants are identical'.format(reaction, reaction.degeneracy))
-
+        logging.debug(
+            'Degeneracy of reaction {} was decreased by 50% to {} since the reactants are identical'.format(
+                reaction, reaction.degeneracy)
+        )
+    elif len(reaction.reactants) == 3:
+        if reaction.isForward and same_reactants:
+            if same_reactants == 'all':
+                reaction.degeneracy /= 6.0
+                logging.debug(
+                    'Degeneracy of reaction {} was divided by 6 to give {} since all of the reactants '
+                    'are identical'.format(reaction, reaction.degeneracy)
+                )
+            else:
+                reaction.degeneracy *= 0.5
+                logging.debug(
+                    'Degeneracy of reaction {} was decreased by 50% to {} since two of the reactants '
+                    'are identical'.format(reaction, reaction.degeneracy)
+                )
+        else:
+            same_01 = reaction.reactants[0].isIsomorphic(reaction.reactants[1])
+            same_02 = reaction.reactants[0].isIsomorphic(reaction.reactants[2])
+            if same_01 and same_02:
+                reaction.degeneracy /= 6.0
+                logging.debug(
+                    'Degeneracy of reaction {} was divided by 6 to give {} since all of the reactants '
+                    'are identical'.format(reaction, reaction.degeneracy)
+                )
+            elif same_01 or same_02:
+                reaction.degeneracy *= 0.5
+                logging.debug(
+                    'Degeneracy of reaction {} was decreased by 50% to {} since two of the reactants '
+                    'are identical'.format(reaction, reaction.degeneracy)
+                )
