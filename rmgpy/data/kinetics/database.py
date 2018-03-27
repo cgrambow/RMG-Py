@@ -433,6 +433,26 @@ library instead, depending on the main bath gas (N2 or Ar/He, respectively)\n"""
                 same_reactants = True
             elif reactants[0].isIsomorphic(reactants[1]):
                 same_reactants = True
+        elif len(reactants) == 3:
+            same_01 = reactants[0] is reactants[1]
+            same_02 = reactants[0] is reactants[2]
+            if same_01 and same_02:
+                same_reactants = 'all'
+                reactants[1] = reactants[1].copy(deep=True)
+                reactants[2] = reactants[2].copy(deep=True)
+            elif same_01:
+                same_reactants = True
+                reactants[1] = reactants[1].copy(deep=True)
+            elif same_02:
+                same_reactants = True
+                reactants[2] = reactants[2].copy(deep=True)
+            else:
+                same_01 = reactants[0].isIsomorphic(reactants[1])
+                same_02 = reactants[0].isIsomorphic(reactants[2])
+                if same_01 and same_02:
+                    same_reactants = 'all'
+                elif same_01 or same_02:
+                    same_reactants = True
 
         # Label reactant atoms for proper degeneracy calculation (cannot be in tuple)
         if isinstance(reactants, tuple):
@@ -502,6 +522,33 @@ library instead, depending on the main bath gas (N2 or Ar/He, respectively)\n"""
                     return True
                 elif species[0].isIsomorphic(molecules[1]) and species[1].isIsomorphic(molecules[0]):
                     return True
+            elif len(species) == len(molecules) == 3:
+                same_00 = species[0].isIsomorphic(molecules[0])
+                same_11 = species[1].isIsomorphic(molecules[1])
+                same_22 = species[2].isIsomorphic(molecules[2])
+                if same_00 and same_11 and same_22:
+                    return True
+                else:
+                    same_12 = species[1].isIsomorphic(molecules[2])
+                    same_21 = species[2].isIsomorphic(molecules[1])
+                    if same_00 and same_12 and same_21:
+                        return True
+                    else:
+                        same_01 = species[0].isIsomorphic(molecules[1])
+                        same_10 = species[1].isIsomorphic(molecules[0])
+                        if same_01 and same_10 and same_22:
+                            return True
+                        else:
+                            same_20 = species[2].isIsomorphic(molecules[0])
+                            if same_01 and same_12 and same_20:
+                                return True
+                            else:
+                                same_02 = species[0].isIsomorphic(molecules[2])
+                                if same_02 and same_10 and same_21:
+                                    return True
+                                else:
+                                    if same_02 and same_11 and same_20:
+                                        return True
             return False
 
         reaction = None; template = None
@@ -569,7 +616,11 @@ library instead, depending on the main bath gas (N2 or Ar/He, respectively)\n"""
                 kdata = numpy.zeros_like(Tdata)
                 for i in range(Tdata.shape[0]):
                     kdata[i] = entry.data.getRateCoefficient(Tdata[i]) / reaction.getEquilibriumConstant(Tdata[i])
-                kunits = 'm^3/(mol*s)' if len(reverse[0].reactants) == 2 else 's^-1'
+                try:
+                    kunits = ('s^-1', 'm^3/(mol*s)', 'm^6/(mol^2*s)')[len(reverse[0].reactants)-1]
+                except IndexError:
+                    raise NotImplementedError('Cannot reverse reactions with {} products'.format(
+                                              len(reverse[0].reactants)))
                 kinetics = Arrhenius().fitToData(Tdata, kdata, kunits, T0=1.0)
                 kinetics.Tmin = entry.data.Tmin
                 kinetics.Tmax = entry.data.Tmax

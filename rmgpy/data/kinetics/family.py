@@ -1465,6 +1465,33 @@ class KineticsFamily(Database):
                 return None
             elif reactants[0].isIsomorphic(products[1]) and reactants[1].isIsomorphic(products[0]):
                 return None
+        elif len(reactants) == len(products) == 3:
+            same_00 = reactants[0].isIsomorphic(products[0])
+            same_11 = reactants[1].isIsomorphic(products[1])
+            same_22 = reactants[2].isIsomorphic(products[2])
+            if same_00 and same_11 and same_22:
+                return None
+            else:
+                same_12 = reactants[1].isIsomorphic(products[2])
+                same_21 = reactants[2].isIsomorphic(products[1])
+                if same_00 and same_12 and same_21:
+                    return None
+                else:
+                    same_01 = reactants[0].isIsomorphic(products[1])
+                    same_10 = reactants[1].isIsomorphic(products[0])
+                    if same_01 and same_10 and same_22:
+                        return None
+                    else:
+                        same_20 = reactants[2].isIsomorphic(products[0])
+                        if same_01 and same_12 and same_20:
+                            return None
+                        else:
+                            same_02 = reactants[0].isIsomorphic(products[2])
+                            if same_02 and same_10 and same_21:
+                                return None
+                            else:
+                                if same_02 and same_11 and same_20:
+                                    return None
 
         # Create and return template reaction object
         reaction = TemplateReaction(
@@ -1507,7 +1534,7 @@ class KineticsFamily(Database):
 
     def generateReactions(self, reactants, products=None, prod_resonance=True):
         """
-        Generate all reactions between the provided list of one or two
+        Generate all reactions between the provided list of one, two, or three
         `reactants`, which should be either single :class:`Molecule` objects
         or lists of same. Does not estimate the kinetics of these reactions
         at this time. Returns a list of :class:`TemplateReaction` objects
@@ -1550,6 +1577,13 @@ class KineticsFamily(Database):
             sameReactants = False
             if len(rxn.products) == 2 and rxn.products[0].isIsomorphic(rxn.products[1]):
                 sameReactants = True
+            elif len(rxn.products) == 3:
+                same_01 = rxn.products[0].isIsomorphic(rxn.products[1])
+                same_02 = rxn.products[0].isIsomorphic(rxn.products[2])
+                if same_01 and same_02:
+                    sameReactants = 'all'
+                elif same_01 or same_02:
+                    sameReactants = True
 
             reactionList = self.__generateReactions([spc.molecule for spc in rxn.products],
                                                     products=rxn.reactants, forward=True)
@@ -1621,6 +1655,26 @@ class KineticsFamily(Database):
                 same_reactants = True
             elif reactants[0].isIsomorphic(reactants[1]):
                 same_reactants = True
+        elif len(reactants) == 3:
+            same_01 = reactants[0] is reactants[1]
+            same_02 = reactants[0] is reactants[2]
+            if same_01 and same_02:
+                same_reactants = 'all'
+                reactants[1] = reactants[1].copy(deep=True)
+                reactants[2] = reactants[2].copy(deep=True)
+            elif same_01:
+                same_reactants = True
+                reactants[1] = reactants[1].copy(deep=True)
+            elif same_02:
+                same_reactants = True
+                reactants[2] = reactants[2].copy(deep=True)
+            else:
+                same_01 = reactants[0].isIsomorphic(reactants[1])
+                same_02 = reactants[0].isIsomorphic(reactants[2])
+                if same_01 and same_02:
+                    same_reactants = 'all'
+                elif same_01 or same_02:
+                    same_reactants = True
 
         # Label reactant atoms for proper degeneracy calculation
         ensure_independent_atom_ids(reactants, resonance=True)
@@ -1760,6 +1814,69 @@ class KineticsFamily(Database):
                                     if productStructures is not None:
                                         rxn = self.__createReaction(reactantStructures, productStructures, forward)
                                         if rxn: rxnList.append(rxn)
+
+        # Trimolecular reactants: A + B + C --> products
+        elif len(reactants) == 3 and len(template.reactants) == 3:
+
+            moleculesA = reactants[0]
+            moleculesB = reactants[1]
+            moleculesC = reactants[2]
+
+            # Iterate over all resonance isomers of the reactants
+            for moleculeA in moleculesA:
+                for moleculeB in moleculesB:
+                    for moleculeC in moleculesC:
+
+                        def generate_products_and_reactions(order):
+                            """
+                            order = (0, 1, 2) corresponds to reactants stored as A + B + C, etc.
+                            """
+                            _mappingsA = self.__matchReactantToTemplate(moleculeA, template.reactants[order[0]])
+                            _mappingsB = self.__matchReactantToTemplate(moleculeB, template.reactants[order[1]])
+                            _mappingsC = self.__matchReactantToTemplate(moleculeC, template.reactants[order[2]])
+
+                            # Iterate over each pair of matches (A, B, C)
+                            for _mapA in _mappingsA:
+                                for _mapB in _mappingsB:
+                                    for _mapC in _mappingsC:
+                                        _reactantStructures = [moleculeA, moleculeB, moleculeC]
+                                        _maps = [_mapA, _mapB, _mapC]
+                                        # Reorder reactants in case we have a family with fewer reactant trees than
+                                        # reactants and different reactant orders can produce different products
+                                        _reactantStructures = [_reactantStructures[_i] for _i in order]
+                                        _maps = [_maps[_i] for _i in order]
+                                        try:
+                                            _productStructures = self.__generateProductStructures(_reactantStructures,
+                                                                                                  _maps,
+                                                                                                  forward)
+                                        except ForbiddenStructureException:
+                                            pass
+                                        else:
+                                            if _productStructures is not None:
+                                                _rxn = self.__createReaction(_reactantStructures,
+                                                                             _productStructures,
+                                                                             forward)
+                                                if _rxn: rxnList.append(_rxn)
+
+                        # Reactants stored as A + B + C
+                        generate_products_and_reactions((0, 1, 2))
+
+                        # Only check for swapped reactants if they are different
+                        if reactants[1] is not reactants[2]:
+                            # Reactants stored as A + C + B
+                            generate_products_and_reactions((0, 2, 1))
+                        if reactants[0] is not reactants[1]:
+                            # Reactants stored as B + A + C
+                            generate_products_and_reactions((1, 0, 2))
+                        if reactants[0] is not reactants[2]:
+                            # Reactants stored as C + B + A
+                            generate_products_and_reactions((2, 1, 0))
+                            if reactants[0] is not reactants[1]:
+                                # Reactants stored as C + A + B
+                                generate_products_and_reactions((2, 0, 1))
+                                # Reactants stored as B + C + A
+                                generate_products_and_reactions((1, 2, 0))
+
         # If products is given, remove reactions from the reaction list that
         # don't generate the given products
         if products is not None:
@@ -1790,6 +1907,33 @@ class KineticsFamily(Database):
                         match = True
                     elif products[0].isIsomorphic(products0[1]) and products[1].isIsomorphic(products0[0]):
                         match = True
+                elif len(products) == len(products0) == 3:
+                    same_00 = products[0].isIsomorphic(products0[0])
+                    same_11 = products[1].isIsomorphic(products0[1])
+                    same_22 = products[2].isIsomorphic(products0[2])
+                    if same_00 and same_11 and same_22:
+                        match = True
+                    else:
+                        same_12 = products[1].isIsomorphic(products0[2])
+                        same_21 = products[2].isIsomorphic(products0[1])
+                        if same_00 and same_12 and same_21:
+                            match = True
+                        else:
+                            same_01 = products[0].isIsomorphic(products0[1])
+                            same_10 = products[1].isIsomorphic(products0[0])
+                            if same_01 and same_10 and same_22:
+                                match = True
+                            else:
+                                same_20 = products[2].isIsomorphic(products0[0])
+                                if same_01 and same_12 and same_20:
+                                    match = True
+                                else:
+                                    same_02 = products[0].isIsomorphic(products0[2])
+                                    if same_02 and same_10 and same_21:
+                                        match = True
+                                    else:
+                                        if same_02 and same_11 and same_20:
+                                            match = True
                 elif len(products) == len(products0):
                     raise NotImplementedError("Can't yet filter reactions with {} products".format(len(products)))
                     
@@ -2184,6 +2328,33 @@ class KineticsFamily(Database):
                             if products[0].isIsomorphic(productStructures[1]):
                                 if products[1].isIsomorphic(productStructures[0]):
                                     return reactantStructures, productStructures
+                        elif len(products) == 3 and len(productStructures) == 3:
+                            same_00 = products[0].isIsomorphic(productStructures[0])
+                            same_11 = products[1].isIsomorphic(productStructures[1])
+                            same_22 = products[2].isIsomorphic(productStructures[2])
+                            if same_00 and same_11 and same_22:
+                                return reactantStructures, productStructures
+                            else:
+                                same_12 = products[1].isIsomorphic(productStructures[2])
+                                same_21 = products[2].isIsomorphic(productStructures[1])
+                                if same_00 and same_12 and same_21:
+                                    return reactantStructures, productStructures
+                                else:
+                                    same_01 = products[0].isIsomorphic(productStructures[1])
+                                    same_10 = products[1].isIsomorphic(productStructures[0])
+                                    if same_01 and same_10 and same_22:
+                                        return reactantStructures, productStructures
+                                    else:
+                                        same_20 = products[2].isIsomorphic(productStructures[0])
+                                        if same_01 and same_12 and same_20:
+                                            return reactantStructures, productStructures
+                                        else:
+                                            same_02 = products[0].isIsomorphic(productStructures[2])
+                                            if same_02 and same_10 and same_21:
+                                                return reactantStructures, productStructures
+                                            else:
+                                                if same_02 and same_11 and same_20:
+                                                    return reactantStructures, productStructures
                         else: continue
             # if there're some mapping available but cannot match the provided products
             # raise exception
@@ -2221,10 +2392,102 @@ class KineticsFamily(Database):
                             if products[0].isIsomorphic(productStructures[1]):
                                 if products[1].isIsomorphic(productStructures[0]):
                                     return reactantStructures, productStructures
+                        elif len(products) == 3 and len(productStructures) == 3:
+                            same_00 = products[0].isIsomorphic(productStructures[0])
+                            same_11 = products[1].isIsomorphic(productStructures[1])
+                            same_22 = products[2].isIsomorphic(productStructures[2])
+                            if same_00 and same_11 and same_22:
+                                return reactantStructures, productStructures
+                            else:
+                                same_12 = products[1].isIsomorphic(productStructures[2])
+                                same_21 = products[2].isIsomorphic(productStructures[1])
+                                if same_00 and same_12 and same_21:
+                                    return reactantStructures, productStructures
+                                else:
+                                    same_01 = products[0].isIsomorphic(productStructures[1])
+                                    same_10 = products[1].isIsomorphic(productStructures[0])
+                                    if same_01 and same_10 and same_22:
+                                        return reactantStructures, productStructures
+                                    else:
+                                        same_20 = products[2].isIsomorphic(productStructures[0])
+                                        if same_01 and same_12 and same_20:
+                                            return reactantStructures, productStructures
+                                        else:
+                                            same_02 = products[0].isIsomorphic(productStructures[2])
+                                            if same_02 and same_10 and same_21:
+                                                return reactantStructures, productStructures
+                                            else:
+                                                if same_02 and same_11 and same_20:
+                                                    return reactantStructures, productStructures
                         else: continue
             # if there're some mapping available but cannot match the provided products
             # raise exception
             if len(mappingsA)*len(mappingsB) > 0:
+                raise ActionError('Something wrong with products that RMG cannot find a match!')
+            return (None, None)
+        elif len(reactants0) == 3:
+            moleculeA = reactants0[0]
+            moleculeB = reactants0[1]
+            moleculeC = reactants0[2]
+            # Get mappings for all permutations of reactants
+            mappingTriples = []
+            for order in itertools.permutations(range(3), 3):
+                mappingsA = self.__matchReactantToTemplate(moleculeA, template.reactants[order[0]])
+                mappingsB = self.__matchReactantToTemplate(moleculeB, template.reactants[order[1]])
+                mappingsC = self.__matchReactantToTemplate(moleculeC, template.reactants[order[2]])
+                mappingTriples.extend(list(itertools.product(mappingsA, mappingsB, mappingsC)))
+
+            reactantStructures = [moleculeA, moleculeB, moleculeC]
+            # Iterate over each triple of matches (A, B, C)
+            for mapA, mapB, mapC in mappingTriples:
+                try:
+                    productStructures = self.__generateProductStructures(reactantStructures, [mapA, mapB, mapC], forward=True)
+                except ForbiddenStructureException:
+                    pass
+                else:
+                    if productStructures is not None:
+                        if len(products) == 1 and len(productStructures) == 1:
+                            if products[0].isIsomorphic(productStructures[0]):
+                                return reactantStructures, productStructures
+                        elif len(products) == 2 and len(productStructures) == 2:
+                            if products[0].isIsomorphic(productStructures[0]):
+                                if products[1].isIsomorphic(productStructures[1]):
+                                    return reactantStructures, productStructures
+                            if products[0].isIsomorphic(productStructures[1]):
+                                if products[1].isIsomorphic(productStructures[0]):
+                                    return reactantStructures, productStructures
+                        elif len(products) == 3 and len(productStructures) == 3:
+                            same_00 = products[0].isIsomorphic(productStructures[0])
+                            same_11 = products[1].isIsomorphic(productStructures[1])
+                            same_22 = products[2].isIsomorphic(productStructures[2])
+                            if same_00 and same_11 and same_22:
+                                return reactantStructures, productStructures
+                            else:
+                                same_12 = products[1].isIsomorphic(productStructures[2])
+                                same_21 = products[2].isIsomorphic(productStructures[1])
+                                if same_00 and same_12 and same_21:
+                                    return reactantStructures, productStructures
+                                else:
+                                    same_01 = products[0].isIsomorphic(productStructures[1])
+                                    same_10 = products[1].isIsomorphic(productStructures[0])
+                                    if same_01 and same_10 and same_22:
+                                        return reactantStructures, productStructures
+                                    else:
+                                        same_20 = products[2].isIsomorphic(productStructures[0])
+                                        if same_01 and same_12 and same_20:
+                                            return reactantStructures, productStructures
+                                        else:
+                                            same_02 = products[0].isIsomorphic(productStructures[2])
+                                            if same_02 and same_10 and same_21:
+                                                return reactantStructures, productStructures
+                                            else:
+                                                if same_02 and same_11 and same_20:
+                                                    return reactantStructures, productStructures
+                        else:
+                            continue
+            # if there're some mapping available but cannot match the provided products
+            # raise exception
+            if len(mappingsA)*len(mappingsB)*len(mappingsC) > 0:
                 raise ActionError('Something wrong with products that RMG cannot find a match!')
             return (None, None)
         else:
