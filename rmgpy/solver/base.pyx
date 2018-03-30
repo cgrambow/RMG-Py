@@ -188,9 +188,10 @@ cdef class ReactionSystem(DASx):
         """
         return (self.__class__, (self.termination,))
 
-    cpdef initializeModel(self, list coreSpecies, list coreReactions, list edgeSpecies, list edgeReactions, list surfaceSpecies=None,
-                          list surfaceReactions=None, list pdepNetworks=None, atol=1e-16, rtol=1e-8, sensitivity=False, 
-                          sens_atol=1e-6, sens_rtol=1e-4, filterReactions=False, dict conditions=None):
+    cpdef initializeModel(self, list coreSpecies, list coreReactions, list edgeSpecies, list edgeReactions,
+                          list surfaceSpecies=None, list surfaceReactions=None, list pdepNetworks=None,
+                          atol=1e-16, rtol=1e-8, sensitivity=False, sens_atol=1e-6, sens_rtol=1e-4,
+                          filterReactions=False, dict conditions=None, trimolecular=False):
         """
         Initialize a simulation of the reaction system using the provided
         kinetic model. You will probably want to create your own version of this
@@ -248,7 +249,9 @@ cdef class ReactionSystem(DASx):
         self.sensitivityCoefficients = numpy.zeros((self.numCoreSpecies, self.numCoreReactions), numpy.float64)
         self.unimolecularThreshold = numpy.zeros((self.numCoreSpecies), bool)
         self.bimolecularThreshold = numpy.zeros((self.numCoreSpecies, self.numCoreSpecies), bool)
-        self.trimolecularThreshold = numpy.zeros((self.numCoreSpecies, self.numCoreSpecies, self.numCoreSpecies), bool)
+        if trimolecular:
+            self.trimolecularThreshold = numpy.zeros((self.numCoreSpecies, self.numCoreSpecies, self.numCoreSpecies),
+                                                     bool)
 
         surfaceSpecies,surfaceReactions = self.initialize_surface(coreSpecies,coreReactions,surfaceSpecies,surfaceReactions)
         
@@ -428,7 +431,7 @@ cdef class ReactionSystem(DASx):
 
         self.y0 = numpy.zeros(self.neq, numpy.float64)
     
-    def set_initial_reaction_thresholds(self):
+    def set_initial_reaction_thresholds(self, trimolecular=False):
         
         # Set unimolecular and bimolecular thresholds as true for any concentrations greater than 0
         numCoreSpecies = len(self.coreSpeciesConcentrations)
@@ -439,13 +442,14 @@ cdef class ReactionSystem(DASx):
             for j in xrange(i, numCoreSpecies):
                 if self.coreSpeciesConcentrations[i] > 0 and self.coreSpeciesConcentrations[j] > 0:
                     self.bimolecularThreshold[i,j] = True
-        for i in xrange(numCoreSpecies):
-            for j in xrange(i, numCoreSpecies):
-                for k in xrange(j, numCoreSpecies):
-                    if (self.coreSpeciesConcentrations[i] > 0
-                            and self.coreSpeciesConcentrations[j] > 0
-                            and self.coreSpeciesConcentrations[k] > 0):
-                        self.trimolecularThreshold[i,j,k] = True
+        if trimolecular:
+            for i in xrange(numCoreSpecies):
+                for j in xrange(i, numCoreSpecies):
+                    for k in xrange(j, numCoreSpecies):
+                        if (self.coreSpeciesConcentrations[i] > 0
+                                and self.coreSpeciesConcentrations[j] > 0
+                                and self.coreSpeciesConcentrations[k] > 0):
+                            self.trimolecularThreshold[i,j,k] = True
 
     def set_initial_derivative(self):
         """
@@ -559,7 +563,7 @@ cdef class ReactionSystem(DASx):
         cdef double toleranceMoveEdgeReactionToCoreInterrupt,toleranceMoveEdgeReactionToSurface
         cdef double toleranceMoveSurfaceSpeciesToCore,toleranceMoveSurfaceReactionToCore
         cdef double toleranceMoveEdgeReactionToSurfaceInterrupt
-        cdef bool ignoreOverallFluxCriterion, filterReactions
+        cdef bool ignoreOverallFluxCriterion, filterReactions, trimolecular
         cdef double absoluteTolerance, relativeTolerance, sensitivityAbsoluteTolerance, sensitivityRelativeTolerance
         cdef dict speciesIndex
         cdef list row, tempSurfaceObjects
@@ -620,6 +624,7 @@ cdef class ReactionSystem(DASx):
         sensitivityRelativeTolerance = simulatorSettings.sens_rtol
         filterReactions = modelSettings.filterReactions
         maxNumObjsPerIter = modelSettings.maxNumObjsPerIter
+        trimolecular = False if self.trimolecularThreshold is None else True
 
         #if not pruning always terminate at max objects, otherwise only do so if terminateAtMaxObjects=True
         terminateAtMaxObjects = True if not prune else modelSettings.terminateAtMaxObjects 
@@ -634,8 +639,8 @@ cdef class ReactionSystem(DASx):
         
         self.initializeModel(coreSpecies, coreReactions, edgeSpecies, edgeReactions, surfaceSpecies, surfaceReactions, 
                              pdepNetworks, absoluteTolerance, relativeTolerance, sensitivity, sensitivityAbsoluteTolerance, 
-                             sensitivityRelativeTolerance, filterReactions,conditions)
-        
+                             sensitivityRelativeTolerance, filterReactions, conditions, trimolecular)
+
         prunableSpeciesIndices = self.prunableSpeciesIndices
         prunableNetworkIndices = self.prunableNetworkIndices
         
@@ -913,15 +918,16 @@ cdef class ReactionSystem(DASx):
                         if not bimolecularThreshold[i,j]:
                             if coreSpeciesConcentrations[i]*coreSpeciesConcentrations[j] > bimolecularThresholdVal:
                                 bimolecularThreshold[i,j] = True
-                for i in xrange(numCoreSpecies):
-                    for j in xrange(i, numCoreSpecies):
-                        for k in xrange(j, numCoreSpecies):
-                            if not trimolecularThreshold[i,j,k]:
-                                if (coreSpeciesConcentrations[i]*
-                                    coreSpeciesConcentrations[j]*
-                                    coreSpeciesConcentrations[k]
-                                        > trimolecularThresholdVal):
-                                    trimolecularThreshold[i,j,k] = True
+                if trimolecularThreshold is not None:
+                    for i in xrange(numCoreSpecies):
+                        for j in xrange(i, numCoreSpecies):
+                            for k in xrange(j, numCoreSpecies):
+                                if not trimolecularThreshold[i,j,k]:
+                                    if (coreSpeciesConcentrations[i]*
+                                        coreSpeciesConcentrations[j]*
+                                        coreSpeciesConcentrations[k]
+                                            > trimolecularThresholdVal):
+                                        trimolecularThreshold[i,j,k] = True
             
             
             ###############################################################################

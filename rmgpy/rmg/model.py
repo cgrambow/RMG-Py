@@ -645,7 +645,7 @@ class CoreEdgeReactionModel:
             # We are reacting the edge
 
             rxns = reactAll(self.core.species, numOldCoreSpecies,
-                            unimolecularReact, bimolecularReact, trimolecularReact)
+                            unimolecularReact, bimolecularReact, trimolecularReact=trimolecularReact)
             spcs = [self.retrieveNewSpecies(rxn) for rxn in rxns]
             
             for rxn, spc in zip(rxns, spcs):
