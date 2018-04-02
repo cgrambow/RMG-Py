@@ -54,6 +54,7 @@ cdef class LiquidReactor(ReactionSystem):
     cdef public ScalarQuantity P    
     cdef public double V
     cdef public bint constantVolume
+    cdef public double viscosity
     cdef public list constSPCNames
     cdef public list constSPCIndices
     cdef public dict initialConcentrations
@@ -61,8 +62,8 @@ cdef class LiquidReactor(ReactionSystem):
     cdef public int nSimsTerm
     cdef public dict sensConditions
     
-    def __init__(self, T, initialConcentrations, nSimsTerm=None, termination=None, sensitiveSpecies=None, sensitivityThreshold=1e-3, sensConditions=None, constSPCNames=None):
-        
+    def __init__(self, T, initialConcentrations, nSimsTerm=None, termination=None,
+                 sensitiveSpecies=None, sensitivityThreshold=1e-3, sensConditions=None, constSPCNames=None):
         ReactionSystem.__init__(self, termination, sensitiveSpecies, sensitivityThreshold)
         
         if type(T) != list:
@@ -74,6 +75,8 @@ cdef class LiquidReactor(ReactionSystem):
         self.initialConcentrations = initialConcentrations # should be passed in SI
         self.V = 0 # will be set from initialConcentrations in initializeModel
         self.constantVolume = True
+        self.viscosity = 0  # in Pa*s
+
         #Constant concentration attributes
         self.constSPCIndices=None
         self.constSPCNames = constSPCNames #store index of constant species 
