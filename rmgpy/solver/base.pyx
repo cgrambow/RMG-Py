@@ -904,10 +904,12 @@ cdef class ReactionSystem(DASx):
                 # Calculate unimolecular and bimolecular thresholds for reaction
                 # Set the maximum unimolecular rate to be kB*T/h
                 unimolecularThresholdVal = toleranceMoveToCore * charRate / (2.08366122e10 * self.T.value_si)
-                # Set the maximum bimolecular rate to be 1e7 m^3/mol*s, or 1e13 cm^3/mol*s
-                bimolecularThresholdVal = toleranceMoveToCore * charRate / 1e7
-                # Set the maximum trimolecular rate to be 1e9 m^6/mol^2*s
-                trimolecularThresholdVal = toleranceMoveToCore * charRate / 1e9
+                # Set the maximum bimolecular rate by approximating diffusivity with Chapman-Enskog theory and
+                # rate constant with Smoluchowski equation with sigma=4 Angstrom, M=30 g/mol, Omega=1, r=2 Angstrom
+                bimolecularThresholdVal = toleranceMoveToCore * charRate / (1.8e12*self.T.value_si**1.5/self.P.value_si)
+                # Set the maximum trimolecular rate by approximating diffusivity with Chapman-Enskog theory and
+                # rate constant with trimolecular Smoluchowski equation (same parameters as for bimolecular)
+                trimolecularThresholdVal = toleranceMoveToCore * charRate / (9.2e9*self.T.value_si**1.5/self.P.value_si)
                 for i in xrange(numCoreSpecies):
                     if not unimolecularThreshold[i]:
                         # Check if core species concentration has gone above threshold for unimolecular reaction
