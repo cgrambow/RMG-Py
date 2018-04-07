@@ -1805,9 +1805,11 @@ class KineticsFamily(Database):
                         # Iterate over each pair of matches (A, B)
                         for mapA in mappingsA:
                             for mapB in mappingsB:
-                                reactantStructures = [moleculeA, moleculeB]
+                                # Reverse the order of reactants in case we have a family with only one reactant tree
+                                # that can produce different products depending on the order of reactants
+                                reactantStructures = [moleculeB, moleculeA]
                                 try:
-                                    productStructures = self.__generateProductStructures(reactantStructures, [mapA, mapB], forward)
+                                    productStructures = self.__generateProductStructures(reactantStructures, [mapB, mapA], forward)
                                 except ForbiddenStructureException:
                                     pass
                                 else:
