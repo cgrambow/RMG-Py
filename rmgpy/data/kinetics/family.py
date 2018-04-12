@@ -1169,67 +1169,68 @@ class KineticsFamily(Database):
         for s in reactantStructures:
             reactantStructure = reactantStructure.merge(s.copy(deep=True))
 
-        # Hardcoding of reaction family for radical recombination (colligation)
-        # because the two reactants are identical, they have the same tags
-        # In this case, we must change the labels from '*' and '*' to '*1' and
-        # '*2'
-        if label == 'r_recombination' and forward:
-            identicalCenterCounter = 0
-            for atom in reactantStructure.atoms:
-                if atom.label == '*':
-                    identicalCenterCounter += 1
-                    atom.label = '*' + str(identicalCenterCounter)
-            if identicalCenterCounter != 2:
-                raise KineticsError('Unable to change labels from "*" to "*1" and "*2" for reaction family {0}.'.format(label))
-        # Hardcoding of reaction family for peroxyl disproportionation
-        # *1 and *2 have to be changed to *3 and *4 for the second reactant
-        elif label == 'peroxyl_disproportionation' and forward:
-            identicalCenterCounter1 = identicalCenterCounter2 = 0
-            for atom in reactantStructure.atoms:
-                if atom.label == '*1':
-                    identicalCenterCounter1 += 1
-                    if identicalCenterCounter1 > 1:
-                        atom.label = '*3'
-                elif atom.label == '*2':
-                    identicalCenterCounter2 += 1
-                    if identicalCenterCounter2 > 1:
-                        atom.label = '*4'
-            if identicalCenterCounter1 != 2 or identicalCenterCounter2 != 2:
-                raise KineticsError('Unable to change labels from "*1" and "*2" to "*3" and "*4" for reaction family {0}.'.format(label))
-        # Hardcoding of reaction family for bimolecular hydroperoxide decomposition
-        # *2 has to be changed to *4 for the second reactant and '*1' has to be
-        # changed to '**' (only used to be able to relabel in the reverse direction)
-        # *3 has to be changed to '*' for the first reactant (also for reverse)
-        elif label == 'bimolec_hydroperoxide_decomposition' and forward:
-            identicalCenterCounter1 = identicalCenterCounter2 = identicalCenterCounter3 = 0
-            for atom in reactantStructure.atoms:
-                if atom.label == '*1':
-                    identicalCenterCounter1 += 1
-                    if identicalCenterCounter1 > 1:
-                        atom.label = '**'
-                elif atom.label == '*2':
-                    identicalCenterCounter2 += 1
-                    if identicalCenterCounter2 > 1:
-                        atom.label = '*4'
-                elif atom.label == '*3':
-                    identicalCenterCounter3 += 1
-                    if identicalCenterCounter3 == 1:
-                        atom.label = '*'
-            msg = ''
-            if identicalCenterCounter1 != 2:
-                msg += 'Unable to change label "*1" to "**" for reaction family {0}. '.format(label)
-            if identicalCenterCounter2 != 2:
-                msg += 'Unable change label "*2" to "*4" for reaction family {0}. '.format(label)
-            if identicalCenterCounter3 != 2:
-                msg += 'Unable to change label "*3" to "*" for reaction family {0}.'.format(label)
-            if msg:
-                raise KineticsError(msg)
-
-        # Generate the product structure by applying the recipe
         if forward:
+            # Hardcoding of reaction family for radical recombination (colligation)
+            # because the two reactants are identical, they have the same tags
+            # In this case, we must change the labels from '*' and '*' to '*1' and
+            # '*2'
+            if label == 'r_recombination':
+                identicalCenterCounter = 0
+                for atom in reactantStructure.atoms:
+                    if atom.label == '*':
+                        identicalCenterCounter += 1
+                        atom.label = '*' + str(identicalCenterCounter)
+                if identicalCenterCounter != 2:
+                    raise KineticsError('Unable to change labels from "*" to "*1" and "*2" for reaction family {0}.'.format(label))
+            # Hardcoding of reaction family for peroxyl disproportionation
+            # *1 and *2 have to be changed to *3 and *4 for the second reactant
+            elif label == 'peroxyl_disproportionation':
+                identicalCenterCounter1 = identicalCenterCounter2 = 0
+                for atom in reactantStructure.atoms:
+                    if atom.label == '*1':
+                        identicalCenterCounter1 += 1
+                        if identicalCenterCounter1 > 1:
+                            atom.label = '*3'
+                    elif atom.label == '*2':
+                        identicalCenterCounter2 += 1
+                        if identicalCenterCounter2 > 1:
+                            atom.label = '*4'
+                if identicalCenterCounter1 != 2 or identicalCenterCounter2 != 2:
+                    raise KineticsError('Unable to change labels from "*1" and "*2" to "*3" and "*4" for reaction family {0}.'.format(label))
+            # Hardcoding of reaction family for bimolecular hydroperoxide decomposition
+            # *2 has to be changed to *4 for the second reactant and '*1' has to be
+            # changed to '**' (only used to be able to relabel in the reverse direction)
+            # *3 has to be changed to '*' for the first reactant (also for reverse)
+            elif label == 'bimolec_hydroperoxide_decomposition':
+                identicalCenterCounter1 = identicalCenterCounter2 = identicalCenterCounter3 = 0
+                for atom in reactantStructure.atoms:
+                    if atom.label == '*1':
+                        identicalCenterCounter1 += 1
+                        if identicalCenterCounter1 > 1:
+                            atom.label = '**'
+                    elif atom.label == '*2':
+                        identicalCenterCounter2 += 1
+                        if identicalCenterCounter2 > 1:
+                            atom.label = '*4'
+                    elif atom.label == '*3':
+                        identicalCenterCounter3 += 1
+                        if identicalCenterCounter3 == 1:
+                            atom.label = '*'
+                msg = ''
+                if identicalCenterCounter1 != 2:
+                    msg += 'Unable to change label "*1" to "**" for reaction family {0}. '.format(label)
+                if identicalCenterCounter2 != 2:
+                    msg += 'Unable change label "*2" to "*4" for reaction family {0}. '.format(label)
+                if identicalCenterCounter3 != 2:
+                    msg += 'Unable to change label "*3" to "*" for reaction family {0}.'.format(label)
+                if msg:
+                    raise KineticsError(msg)
+
+            # Generate the product structure by applying the recipe
             self.forwardRecipe.applyForward(reactantStructure, unique)
         else:
             self.reverseRecipe.applyForward(reactantStructure, unique)
+
         if not reactantStructure.props['validAromatic']:
             if isinstance(reactantStructure, Molecule):
                 # For molecules, kekulize the product to redistribute bonds appropriately
@@ -1241,34 +1242,35 @@ class KineticsFamily(Database):
                 return []
         productStructure = reactantStructure
 
-        # Hardcoding of reaction family for reverse of radical recombination
-        # (Unimolecular homolysis)
-        # Because the two products are identical, they should the same tags
-        # In this case, we must change the labels from '*1' and '*2' to '*' and
-        # '*'
-        if label == 'r_recombination' and not forward:
-            for atom in productStructure.atoms:
-                if atom.label == '*1' or atom.label == '*2':
-                    atom.label = '*'
-        # Hardcoding of reaction family for reverse of peroxyl disproportionation
-        # Labels '*3' and '*4' have to be changed back to '*1' and '*2'
-        elif label == 'peroxyl_disproportionation' and not forward:
-            for atom in productStructure.atoms:
-                if atom.label == '*3':
-                    atom.label = '*1'
-                elif atom.label == '*4':
-                    atom.label = '*2'
-        # Hardcoding of reaction family for bimolecular hydroperoxide decomposition
-        # '*' has to be changed back to '*3', '**' has to be changed to '*1', and
-        # '*4' has to be changed to '*2'
-        elif label == 'bimolec_hydroperoxide_decomposition' and not forward:
-            for atom in productStructure.atoms:
-                if atom.label == '*':
-                    atom.label = '*3'
-                elif atom.label == '**':
-                    atom.label = '*1'
-                elif atom.label == '*4':
-                    atom.label = '*2'
+        if not forward:
+            # Hardcoding of reaction family for reverse of radical recombination
+            # (Unimolecular homolysis)
+            # Because the two products are identical, they should the same tags
+            # In this case, we must change the labels from '*1' and '*2' to '*' and
+            # '*'
+            if label == 'r_recombination':
+                for atom in productStructure.atoms:
+                    if atom.label == '*1' or atom.label == '*2':
+                        atom.label = '*'
+            # Hardcoding of reaction family for reverse of peroxyl disproportionation
+            # Labels '*3' and '*4' have to be changed back to '*1' and '*2'
+            elif label == 'peroxyl_disproportionation':
+                for atom in productStructure.atoms:
+                    if atom.label == '*3':
+                        atom.label = '*1'
+                    elif atom.label == '*4':
+                        atom.label = '*2'
+            # Hardcoding of reaction family for bimolecular hydroperoxide decomposition
+            # '*' has to be changed back to '*3', '**' has to be changed to '*1', and
+            # '*4' has to be changed to '*2'
+            elif label == 'bimolec_hydroperoxide_decomposition':
+                for atom in productStructure.atoms:
+                    if atom.label == '*':
+                        atom.label = '*3'
+                    elif atom.label == '**':
+                        atom.label = '*1'
+                    elif atom.label == '*4':
+                        atom.label = '*2'
 
         # If reaction family is its own reverse, relabel atoms
         # This allows comparison of the product species to forbidden
@@ -1282,7 +1284,6 @@ class KineticsFamily(Database):
                 if atom.label != '':
                     atomLabels[atom.label] = atom
 
-            label = self.label.lower()
             if label == 'h_abstraction':
                 # '*2' is the H that migrates
                 # it moves from '*1' to '*3'
@@ -1334,8 +1335,10 @@ class KineticsFamily(Database):
                 atomLabels['*2'].label = '*3'
                 atomLabels['*3'].label = '*2'
 
-        if not forward: template = self.reverseTemplate
-        else:           template = self.forwardTemplate
+        if not forward:
+            template = self.reverseTemplate
+        else:
+            template = self.forwardTemplate
 
         # Split product structure into multiple species if necessary
         productStructures = productStructure.split()
