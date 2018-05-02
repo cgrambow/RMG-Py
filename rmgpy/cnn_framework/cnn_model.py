@@ -91,8 +91,8 @@ def train_model(model,
 		loss - list of training losses corresponding to each epoch 
 		inner_val_loss - list of validation losses corresponding to each epoch
 	"""
-	X_train = np.array(X_train)
-	y_train = np.array(y_train)
+	# X_train = np.array(X_train)
+	# y_train = np.array(y_train)
 
 	# Create learning rate function
 	lr_func_string = 'def lr(epoch):\n    return {}\n'.format(lr_func)
@@ -146,7 +146,7 @@ def train_model(model,
 
 			# report outer_val and test loss
 			if i % 1 == 0:
-				if X_outer_val:
+				if X_outer_val is not None:
 					mean_outer_val_loss = evaluate_mean_tst_loss(model, X_outer_val, y_outer_val)
 					logging.info('mse outer_val_loss: {}'.format(mean_outer_val_loss))
 
@@ -169,7 +169,7 @@ def train_model(model,
 			model.load_weights('train_cnn_results/best.h5')
 
 		# evaluate outer validation loss and test loss upon final model
-		if X_outer_val:
+		if X_outer_val is not None:
 			mean_outer_val_loss = evaluate_mean_tst_loss(model, X_outer_val, y_outer_val)
 		else:
 			mean_outer_val_loss = None
