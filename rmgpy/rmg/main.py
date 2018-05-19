@@ -1159,7 +1159,7 @@ class RMG(util.Subject):
             self.bimolecularThreshold = numpy.zeros((numCoreSpecies, numCoreSpecies),bool)
             if self.trimolecular:
                 self.trimolecularReact = numpy.zeros((numCoreSpecies, numCoreSpecies, numCoreSpecies), bool)
-                self.trimolecularReact = numpy.zeros((numCoreSpecies, numCoreSpecies, numCoreSpecies),bool)
+                self.trimolecularThreshold = numpy.zeros((numCoreSpecies, numCoreSpecies, numCoreSpecies),bool)
         else:
             # By default, react everything
             self.unimolecularReact = numpy.ones((numCoreSpecies),bool)
