@@ -77,10 +77,12 @@ def writeMolFracs(rmg, rxnSysIndex, time, dataList):
     exactMass = ['exact_mass']
     numRadElectrons = ['num_rad_electrons']
 
+    exactMasses = {'H': 1.007825, 'C': 12., 'N': 14.003074, 'O': 15.994915, 'He': 4.002603, 'Ne': 19.992440, 'Ar': 39.962383}  # u
+
     for data in dataList:
         mol = data.species.molecule[0]
         smiles.append(mol.toSMILES())
-        exactMass.append(mol.getMolecularWeight() * 1000.0)
+        exactMass.append(sum(exactMasses[atom.symbol] for atom in mol.atoms))
         numRadElectrons.append(mol.getRadicalCount())
 
     path = os.path.join(rmg.outputDirectory, 'solver', 'out_data_{}_species_X.csv'.format(rxnSysIndex))
