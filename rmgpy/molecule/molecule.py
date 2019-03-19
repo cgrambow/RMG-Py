@@ -1144,7 +1144,7 @@ class Molecule(Graph):
                     self.addBond(bond)
         self.updateAtomTypes()
         
-    def updateAtomTypes(self, logSpecies=True, raiseException=True):
+    def updateAtomTypes(self, logSpecies=True, raiseException=False):
         """
         Iterate through the atoms in the structure, checking their atom types
         to ensure they are correct (i.e. accurately describe their local bond
