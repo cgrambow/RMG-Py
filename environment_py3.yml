@@ -4,6 +4,7 @@ channels:
   - rmg
   - rdkit
   - cantera
+  - pytorch
   - conda-forge
 dependencies:
   - cairo
