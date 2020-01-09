@@ -47,7 +47,7 @@ atom_spins = {
 }
 
 
-def get_bac(model_chemistry, coords, nums, multiplicity=1, mol_corr=0.0):
+def get_bac(model_chemistry, coords=None, nums=None, mol=None, multiplicity=1, params=None):
     """
     Given the model chemistry, molecular coordinates, atomic numbers,
     and dictionaries of BAC parameters, return the total BAC
@@ -60,18 +60,21 @@ def get_bac(model_chemistry, coords, nums, multiplicity=1, mol_corr=0.0):
     alpha = 3.0  # Angstrom^-1
 
     # Get BAC parameters
-    try:
-        params = data.mbac[model_chemistry]
-    except KeyError:
-        raise BondAdditivityCorrectionError(
-            'Missing Melius-type BAC parameters for model chemistry {}'.format(model_chemistry)
-        )
+    if params is None:
+        try:
+            params = data.mbac[model_chemistry]
+        except KeyError:
+            raise BondAdditivityCorrectionError(
+                'Missing Melius-type BAC parameters for model chemistry {}'.format(model_chemistry)
+            )
     atom_corr = params['atom_corr']
     bond_corr_length = params['bond_corr_length']
     bond_corr_neighbor = params['bond_corr_neighbor']
+    mol_corr = params['mol_corr']
 
     # Get single-bonded RMG molecule
-    mol = geo_to_mol(coords, nums)
+    if mol is None:
+        mol = geo_to_mol(coords, nums)
 
     # Molecular correction
     spin = 0.5 * (multiplicity - 1)
@@ -104,6 +107,86 @@ def get_bac(model_chemistry, coords, nums, multiplicity=1, mol_corr=0.0):
                 bac_bond += bond_corr_neighbor[symbol2] + bond_corr_neighbor[other_symbol]
 
     return (bac_mol + bac_atom + bac_bond) * 4184.0  # Convert kcal/mol to J/mol
+
+
+def get_grad(model_chemistry, coords=None, nums=None, mol=None, multiplicity=1, mol_corr=True, params=None):
+    """Calculate gradient of BAC"""
+
+    # TODO: Plenty of opportunities for caching values, only have to calculate linear terms once
+
+    alpha = 3.0  # Angstrom^-1
+    eps = 1e-8
+
+    # Get BAC parameters
+    if params is None:
+        try:
+            params = data.mbac[model_chemistry]
+        except KeyError:
+            raise BondAdditivityCorrectionError(
+                'Missing Melius-type BAC parameters for model chemistry {}'.format(model_chemistry)
+            )
+    bond_corr_length = params['bond_corr_length']
+    symbols = sorted(bond_corr_length.keys())
+
+    # Get single-bonded RMG molecule
+    if mol is None:
+        mol = geo_to_mol(coords, nums)
+
+    # Atomic terms
+    symbols_in_mol = {atom.element.symbol for atom in mol.atoms}
+    grad_atom = [1.0 if symbol in symbols_in_mol else 0.0 for symbol in symbols]
+
+    # Bondwise terms
+    grad_length = [0] * len(symbols)
+    grad_neighbor = [0] * len(symbols)
+    bonds = mol.getAllEdges()
+
+    for i, symbol in enumerate(symbols):
+        for bond in bonds:
+            atom1 = bond.atom1
+            atom2 = bond.atom2
+            symbol1 = atom1.element.symbol
+            symbol2 = atom2.element.symbol
+
+            # Bond length terms
+            prefactor = 0
+            if symbol == symbol1 == symbol2:
+                prefactor = 1
+            elif symbol == symbol1 and symbol != symbol2:
+                # prefactor = ((bond_corr_length[symbol] * bond_corr_length[symbol2]) ** 0.5
+                #              / (2.0 * bond_corr_length[symbol]))
+                prefactor = (bond_corr_length[symbol2] /
+                             (2.0 * (bond_corr_length[symbol] * bond_corr_length[symbol2] + eps) ** 0.5))
+            elif symbol != symbol1 and symbol == symbol2:
+                # prefactor = ((bond_corr_length[symbol] * bond_corr_length[symbol1]) ** 0.5
+                #              / (2.0 * bond_corr_length[symbol]))
+                prefactor = (bond_corr_length[symbol1] /
+                             (2.0 * (bond_corr_length[symbol] * bond_corr_length[symbol1] + eps) ** 0.5))
+
+            if prefactor:
+                length = np.linalg.norm(atom1.coords - atom2.coords)
+                length_exp = np.exp(-alpha * length)
+                grad_length[i] += prefactor * length_exp
+
+            # Bond neighbor terms
+            if symbol == symbol1 == symbol2:
+                nneighbor1 = sum(1 for other_bond in mol.getBonds(atom1).values() if other_bond is not bond)
+                nneighbor2 = sum(1 for other_bond in mol.getBonds(atom2).values() if other_bond is not bond)
+                grad_neighbor[i] += nneighbor1 + nneighbor2
+            elif symbol == symbol1 and symbol != symbol2:
+                nneighbor1 = sum(1 for other_bond in mol.getBonds(atom1).values() if other_bond is not bond)
+                grad_neighbor[i] += nneighbor1
+            elif symbol != symbol1 and symbol == symbol2:
+                nneighbor2 = sum(1 for other_bond in mol.getBonds(atom2).values() if other_bond is not bond)
+                grad_neighbor[i] += nneighbor2
+
+    if mol_corr:
+        # Molecular term
+        spin = 0.5 * (multiplicity - 1)
+        grad_mol = [spin - sum(atom_spins[atom.element.symbol] for atom in mol.atoms)]
+        return np.array(grad_atom + grad_length + grad_neighbor + grad_mol)  # UNITS BASED ON kcal/mol
+    else:
+        return np.array(grad_atom + grad_length + grad_neighbor)  # UNITS BASED ON kcal/mol
 
 
 def geo_to_mol(coords, nums):
