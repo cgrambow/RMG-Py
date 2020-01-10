@@ -38,17 +38,23 @@ The second type, Melius-type BACs, are described in:
 Anantharaman and Melius, J. Phys. Chem. A 2005, 109, 1734-1747
 """
 
+import importlib
+import json
 import logging
+import os
 import re
-from typing import Dict, Iterable, Union
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Tuple, Union
 
 import numpy as np
 import pybel
+import scipy.optimize as optimize
 
 from rmgpy.molecule import Atom, Bond, Molecule, get_element
 
 import arkane.encorr.data as data
 from arkane.exceptions import BondAdditivityCorrectionError
+from arkane.reference import ReferenceDatabase
 
 
 class BAC:
@@ -56,6 +62,8 @@ class BAC:
     A class for deriving and applying bond additivity corrections.
     """
 
+    ref_database = None
+    bond_symbols = {1: '-', 2: '=', 3: '#'}
     atom_spins = {
         'H': 0.5, 'C': 1.0, 'N': 1.5, 'O': 1.0, 'F': 0.5,
         'Si': 1.0, 'P': 1.5, 'S': 1.0, 'Cl': 0.5, 'Br': 0.5, 'I': 0.5
@@ -66,6 +74,12 @@ class BAC:
         self._model_chemistry = self._bac_type = None  # Set these first to avoid errors in setters
         self.model_chemistry = model_chemistry
         self.bac_type = bac_type
+
+        # Attributes related to fitting BACs for a given model chemistry
+        self.species = None  # Reference species
+        self.ref_data = None  # Reference enthalpies of formation
+        self.calc_data = None  # Calculated enthalpies of formation
+        self.bac_data = None  # Calculated data corrected with BACs
 
     @property
     def bac_type(self) -> str:
@@ -98,6 +112,14 @@ class BAC:
                 self.bacs = data.pbac[self.model_chemistry]
         except KeyError:
             pass
+
+    @classmethod
+    def _load_database(cls):
+        """Load the reference database"""
+        if cls.ref_database is None:
+            logging.info('Loading reference database')
+            cls.ref_database = ReferenceDatabase()
+            cls.ref_database.load()
 
     def get_correction(self,
                        bonds: Dict[str, int] = None,
@@ -235,6 +257,274 @@ class BAC:
                     bac_bond += bond_corr_neighbor[symbol2] + bond_corr_neighbor[other_symbol]
 
         return (bac_mol + bac_atom + bac_bond) * 4184.0  # Convert kcal/mol to J/mol
+
+    def fit(self, **kwargs):
+        """
+        Fits bond additivity corrections using calculated and reference
+        data available in the RMG database. The resulting BACs stored
+        in self.bacs will be based on kcal/mol.
+
+        Args:
+            kwargs: Keyword arguments for fitting Melius-type BACs (see self._fit_melius).
+        """
+        self._load_database()  # Will only be loaded the first time that self.fit is called
+
+        self.species = self.ref_database.extract_model_chemistry(self.model_chemistry, as_error_canceling_species=False)
+        if not self.species:
+            raise BondAdditivityCorrectionError(f'No species available for {self.model_chemistry} model chemistry')
+
+        # Obtain data in kcal/mol
+        self.ref_data = np.array([spc.get_reference_enthalpy().h298.value_si / 4184.0 for spc in self.species])
+        self.calc_data = np.array(
+            [spc.calculated_data[self.model_chemistry].thermo_data.H298.value_si / 4184.0 for spc in self.species]
+        )
+
+        if self.bac_type == 'm':
+            logging.info(f'Fitting Melius-type BACs for {self.model_chemistry}...')
+            self._fit_melius(**kwargs)
+        elif self.bac_type == 'p':
+            logging.info(f'Fitting Petersson-type BACs for {self.model_chemistry}...')
+            self._fit_petersson()
+
+        stats_before = self.calculate_stats(self.calc_data)
+        stats_after = self.calculate_stats(self.bac_data)
+        logging.info(f'RMSE/MAE before fitting: {stats_before.rmse:.2f}/{stats_before.mae:.2f} kcal/mol')
+        logging.info(f'RMSE/MAE after fitting: {stats_after.rmse:.2f}/{stats_after.mae:.2f} kcal/mol')
+
+    def _fit_petersson(self):
+        """
+        Fit Petersson-type BACs.
+        """
+        mols = [Molecule().from_adjacency_list(spc.adjacency_list) for spc in self.species]
+
+        def get_features(_mol: Molecule) -> Dict[str, int]:
+            """Given a molecule, extract the number of bonds of each type."""
+            _features = {}
+            for bond in _mol.get_all_edges():
+                symbols = [bond.atom1.element.symbol, bond.atom2.element.symbol]
+                symbols.sort()  # Ensure that representation is invariant to order of atoms in bond
+                symbol = symbols[0] + self.bond_symbols[bond.order] + symbols[1]
+                _features[symbol] = _features.get(symbol, 0) + 1
+            return _features
+
+        features = [get_features(mol) for mol in mols]
+        feature_keys = list({k for f in features for k in f})
+        feature_keys.sort()
+
+        def make_feature_mat(_features: List[Dict[str, int]]) -> np.ndarray:
+            _x = np.zeros((len(_features), len(feature_keys)))
+            for idx, f in enumerate(_features):
+                flist = []
+                for k in feature_keys:
+                    try:
+                        flist.append(f[k])
+                    except KeyError:
+                        flist.append(0.0)
+                _x[idx] = np.array(flist)
+            return _x
+
+        def lin_reg(_x: np.ndarray, _y: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+            _w = np.linalg.solve(np.dot(_x.T, _x), np.dot(_x.T, _y))
+            _ypred = np.dot(_x, _w)
+            return _w, _ypred
+
+        x = make_feature_mat(features)
+        y = self.ref_data - self.calc_data
+        w, ypred = lin_reg(x, y)
+
+        self.bac_data = self.calc_data + ypred
+        self.bacs = {fk: wi for fk, wi in zip(feature_keys, w)}
+
+    def _fit_melius(self,
+                    fit_mol_corr: bool = False,
+                    global_opt: bool = True,
+                    global_opt_iter: int = 15,
+                    minimizer_maxiter: int = 100):
+        """
+        Fit Melius-type BACs.
+
+        Args:
+            fit_mol_corr: Also fit molecular correction term.
+            global_opt: Perform a global optimization.
+            global_opt_iter: Number of iterations for the global minimization.
+            minimizer_maxiter: Maximum number of iterations for the SLSQP minimizer.
+        """
+        conformers = [spc.calculated_data[self.model_chemistry].conformer for spc in self.species]
+        geos = [(conformer.number.value.astype(int), conformer.coordinates.value) for conformer in conformers]
+        mols = [_geo_to_mol(*geo) for geo in geos]
+
+        all_atom_symbols = list({atom.element.symbol for mol in mols for atom in mol.atoms})
+        all_atom_symbols.sort()
+        nelements = len(all_atom_symbols)
+        low, high = -1e6, 1e6  # Arbitrarily large, just so that we can use bounds in global minimization
+
+        # Specify initial guess.
+        # Order of parameters is atom_corr, bond_corr_length, bond_corr_neighbor (, mol_corr)
+        # where atom_corr are the atomic corrections, bond_corr_length are the bondwise corrections
+        # due to bond lengths (bounded by 0 below), bond_corr_neighbor are the bondwise corrections
+        # due to neighboring atoms, and mol_corr (optional) is a molecular correction.
+        if fit_mol_corr:
+            w0 = np.zeros(3 * nelements + 1) + 1e-6
+            wmin = [low] * nelements + [0] * nelements + [low] * nelements + [low]
+            wmax = [high] * (3 * nelements + 1)
+        else:
+            w0 = np.zeros(3 * nelements) + 1e-6
+            wmin = [low] * nelements + [0] * nelements + [low] * nelements
+            wmax = [high] * 3 * nelements
+        bounds = [(lo, hi) for lo, hi in zip(wmin, wmax)]
+
+        class RandomDisplacementBounds:
+            """Random displacement with bounds"""
+            def __init__(self, stepsize: float = 0.5):
+                self.xmin = wmin
+                self.xmax = wmax
+                self.stepsize = stepsize
+
+            def __call__(self, x: np.ndarray) -> np.ndarray:
+                """Take a random step but ensure the new position is within the bounds"""
+                while True:
+                    xnew = x + np.random.uniform(-self.stepsize, self.stepsize, np.shape(x))
+                    if np.all(xnew < self.xmax) and np.all(xnew > self.xmin):
+                        break
+                return xnew
+
+        def get_params(_w: np.ndarray) -> Dict[str, Union[float, Dict[str, float]]]:
+            _atom_corr = dict(zip(all_atom_symbols, _w[:nelements]))
+            _bond_corr_length = dict(zip(all_atom_symbols, _w[nelements:2 * nelements]))
+            _bond_corr_neighbor = dict(zip(all_atom_symbols, _w[2 * nelements:3 * nelements]))
+            _mol_corr = _w[3 * nelements] if fit_mol_corr else 0.0
+            return dict(
+                atom_corr=_atom_corr,
+                bond_corr_length=_bond_corr_length,
+                bond_corr_neighbor=_bond_corr_neighbor,
+                mol_corr=_mol_corr
+            )
+
+        def get_bac_data(_w: np.ndarray) -> np.ndarray:
+            corr = np.array(
+                [self._get_melius_correction(mol=mol, multiplicity=spc.multiplicity, params=get_params(_w)) / 4184.0
+                 for mol, spc in zip(mols, self.species)]
+            )
+            return self.calc_data - corr  # Need negative sign here
+
+        def objfun(_w: np.ndarray) -> Union[float, np.ndarray]:
+            """Least-squares objective function"""
+            bac_data = get_bac_data(_w)
+            diff = self.ref_data - bac_data
+            return np.dot(diff, diff) / len(self.ref_data)
+
+        # SLSQP minimization is a little faster
+        minimizer_kwargs = dict(method='SLSQP', bounds=bounds, options={'disp': True, 'maxiter': minimizer_maxiter})
+        if global_opt:
+            take_step = RandomDisplacementBounds()
+            res = optimize.basinhopping(
+                objfun, w0, niter=global_opt_iter, minimizer_kwargs=minimizer_kwargs, take_step=take_step, disp=True
+            )
+        else:
+            res = optimize.minimize(objfun, w0, **minimizer_kwargs)
+        w = res.x
+
+        self.bac_data = get_bac_data(w)
+        self.bacs = get_params(w)
+
+    def calculate_stats(self, calc_data: np.ndarray) -> 'Stats':
+        """
+        Calculate RMSE and MAE based on stored reference data.
+
+        Args:
+            calc_data: Calculated data in same order as self.ref_data.
+
+        Returns:
+            Data class with `rmse` and `mae` attributes.
+        """
+        if self.ref_data is None:
+            raise BondAdditivityCorrectionError('Fit BACs before calculating statistics!')
+
+        diff = self.ref_data - calc_data
+        rmse = np.sqrt(np.dot(diff, diff) / len(self.ref_data))
+        mae = np.sum(np.abs(diff)) / len(self.ref_data)
+
+        return Stats(rmse, mae)
+
+    def write_to_database(self, overwrite: bool = False, alternate_path: str = None):
+        """
+        Write BACs to data.py.
+
+        Args:
+            overwrite: Overwrite existing BACs.
+            alternate_path: Write BACs to this path instead.
+        """
+        if self.bacs is None:
+            raise BondAdditivityCorrectionError('No BACs available for writing')
+
+        data_path = os.path.abspath(data.__file__)
+        with open(data_path) as f:
+            lines = f.readlines()
+
+        bacs_formatted = self.format_bacs(indent=True)
+
+        bac_dict = data.mbac if self.bac_type == 'm' else data.pbac
+        keyword = 'mbac' if self.bac_type == 'm' else 'pbac'
+        has_entries = bool(data.mbac) if self.bac_type == 'm' else bool(data.pbac)
+
+        # Add new BACs to file without changing existing formatting
+        for i, line in enumerate(lines):
+            if keyword in line:
+                if has_entries:
+                    if self.model_chemistry in bac_dict:
+                        if overwrite:
+                            # Does not overwrite comments
+                            for j, line2 in enumerate(lines[i:]):
+                                if self.model_chemistry in line2:
+                                    del_idx_start = i + j
+                                elif line2.rstrip() == '    },':  # Can't have comment after final brace
+                                    del_idx_end = i + j + 1
+                            if (lines[del_idx_start-1].lstrip().startswith('#')
+                                    or lines[del_idx_end+1].lstrip().startswith('#')):
+                                logging.warning('There may be left over comments from previous BACs')
+                            lines[del_idx_start:del_idx_end] = bacs_formatted
+                        else:
+                            raise IOError(
+                                f'{self.model_chemistry} model chemistry already exists. Set `overwrite` to True.'
+                            )
+                    else:
+                        lines[(i+1):(i+1)] = ['\n'] + bacs_formatted
+                else:
+                    lines[i] = f'{keyword} = {{\n'
+                    lines[(i+1):(i+1)] = ['\n'] + bacs_formatted + ['\n}\n']
+                break
+
+        with open(data_path if alternate_path is None else alternate_path, 'w') as f:
+            f.writelines(lines)
+
+        # Reload data to update BAC dictionaries
+        if alternate_path is None:
+            importlib.reload(data)
+
+    def format_bacs(self, indent=False):
+        """
+        Obtain a list of nicely formatted BACs suitable for writelines.
+
+        Args:
+            indent: Indent each line for printing in data.py.
+
+        Returns:
+            Formatted list of BACs.
+        """
+        bacs_formatted = json.dumps(self.bacs, indent=4).replace('"', "'").split('\n')
+        bacs_formatted[0] = f"'{self.model_chemistry}': " + bacs_formatted[0]
+        bacs_formatted[-1] += ','
+        bacs_formatted = [e + '\n' for e in bacs_formatted]
+        if indent:
+            bacs_formatted = ['    ' + e for e in bacs_formatted]
+        return bacs_formatted
+
+
+@dataclass
+class Stats:
+    """Small class to store BAC fitting statistics"""
+    rmse: Union[float, np.ndarray]
+    mae: Union[float, np.ndarray]
 
 
 def _geo_to_mol(nums: Iterable[int], coords: np.ndarray) -> Molecule:
