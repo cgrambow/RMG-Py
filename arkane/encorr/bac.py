@@ -50,6 +50,7 @@ from typing import Dict, Iterable, List, Tuple, Union
 import numpy as np
 import pybel
 import scipy.optimize as optimize
+from scipy.linalg import svd
 
 from rmgpy.molecule import Atom, Bond, Molecule, get_element
 
@@ -154,7 +155,8 @@ class BACJob:
 
     def plot(self, output_directory: str, jobnum: int = 1):
         """
-        Plot the distribution of errors before and after fitting BACs.
+        Plot the distribution of errors before and after fitting BACs
+        and plot the parameter correlation matrix.
 
         Args:
             output_directory: Save the plots in this directory.
@@ -165,9 +167,12 @@ class BACJob:
         except ImportError:
             return
 
-        plt.rcParams.update({'font.size': 16})
         model_chemistry_formatted = self.model_chemistry.replace('/', '_')
-        fig_path = os.path.join(output_directory, f'{jobnum}_{model_chemistry_formatted}.pdf')
+        correlation_path = os.path.join(output_directory, f'{jobnum}_{model_chemistry_formatted}_correlation.pdf')
+        self.bac.save_correlation_mat(correlation_path)
+
+        plt.rcParams.update({'font.size': 16})
+        fig_path = os.path.join(output_directory, f'{jobnum}_{model_chemistry_formatted}_errors.pdf')
 
         fig = plt.figure(figsize=(10, 7))
         ax = fig.gca()
@@ -218,6 +223,7 @@ class BAC:
         self.ref_data = None  # Reference enthalpies of formation
         self.calc_data = None  # Calculated enthalpies of formation
         self.bac_data = None  # Calculated data corrected with BACs
+        self.correlation = None  # Correlation matrix for BAC parameters
 
     @property
     def bac_type(self) -> str:
@@ -470,6 +476,9 @@ class BAC:
         y = self.ref_data - self.calc_data
         w, ypred = lin_reg(x, y)
 
+        covariance_unscaled = np.linalg.inv(x.T @ x)
+        self.correlation = _covariance_to_correlation(covariance_unscaled)
+
         self.bac_data = self.calc_data + ypred
         self.bacs = {fk: wi for fk, wi in zip(feature_keys, w)}
 
@@ -584,6 +593,14 @@ class BAC:
         res = optimize.least_squares(residuals, w, jac='3-point', bounds=(wmin, wmax), max_nfev=500, verbose=1)
         w = res.x
 
+        # Estimate parameter covariance matrix using Jacobian
+        _, s, vT = svd(res.jac, full_matrices=False)
+        thresh = np.finfo(float).eps * max(res.jac.shape) * s[0]
+        s = s[s > thresh]
+        vT = vT[:s.size]
+        covariance = (vT.T / s ** 2) @ vT
+        self.correlation = _covariance_to_correlation(covariance)
+
         self.bac_data = get_bac_data(w)
         self.bacs = get_params(w)
 
@@ -679,12 +696,71 @@ class BAC:
             bacs_formatted = ['    ' + e for e in bacs_formatted]
         return bacs_formatted
 
+    def save_correlation_mat(self, path, labels=None):
+        """
+        Save a visual representation of the parameter correlation matrix.
+
+        Args:
+            path: Path to save figure to.
+            labels: Parameter labels.
+        """
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            return
+
+        if self.correlation is None:
+            raise BondAdditivityCorrectionError('Fit BACs before saving correlation matrix!')
+
+        if labels is None:
+            if self.bac_type == 'm':
+                param_types = list(self.bacs.keys())
+                atom_symbols = list(self.bacs[param_types[0]])
+                labels = [r'$\alpha_{' + s + r'}$' for s in atom_symbols]      # atom_corr is alpha
+                labels.extend(r'$\beta_{' + s + r'}$' for s in atom_symbols)   # bond_corr_length is beta
+                labels.extend(r'$\gamma_{' + s + r'}$' for s in atom_symbols)  # bond_corr_neighbor is gamma
+                if len(self.correlation) == 3 * len(atom_symbols) + 1:
+                    labels.append('K')  # mol_corr is K
+            elif self.bac_type == 'p':
+                labels = list(self.bacs.keys())
+
+        fig, ax = plt.subplots(figsize=(11, 11) if self.bac_type == 'm' else (18, 18))
+        ax.matshow(self.correlation, cmap=plt.cm.PiYG)
+
+        # Superimpose values as text
+        for i in range(len(self.correlation)):
+            for j in range(len(self.correlation)):
+                c = self.correlation[j, i]
+                ax.text(i, j, f'{c: .2f}', va='center', ha='center', fontsize=8)
+
+        # Save lims because they get changed when modifying labels
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+
+        ax.set_xticks(list(range(len(self.correlation))))
+        ax.set_yticks(list(range(len(self.correlation))))
+        ax.set_xticklabels(labels, fontsize=14, rotation='vertical' if self.bac_type == 'p' else None)
+        ax.set_yticklabels(labels, fontsize=14)
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.tick_params(bottom=False, top=False, left=False, right=False)
+
+        fig.savefig(path, dpi=600, bbox_inches='tight', pad_inches=0)
+
 
 @dataclass
 class Stats:
     """Small class to store BAC fitting statistics"""
     rmse: Union[float, np.ndarray]
     mae: Union[float, np.ndarray]
+
+
+def _covariance_to_correlation(cov):
+    """Convert (unscaled) covariance matrix to correlation matrix"""
+    v = np.sqrt(np.diag(cov))
+    corr = cov / np.outer(v, v)
+    corr[cov == 0] = 0
+    return corr
 
 
 def _geo_to_mol(nums: Iterable[int], coords: np.ndarray) -> Molecule:
