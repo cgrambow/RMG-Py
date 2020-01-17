@@ -503,43 +503,72 @@ class BAC:
         all_atom_symbols = list({atom.element.symbol for mol in mols for atom in mol.atoms})
         all_atom_symbols.sort()
         nelements = len(all_atom_symbols)
-        low, high = -1e6, 1e6  # Arbitrarily large, just so that we can use bounds in global minimization
 
-        # Specify initial guess.
-        # Order of parameters is atom_corr, bond_corr_length, bond_corr_neighbor (, mol_corr)
+        # The order of parameters is
+        #     atom_corr (alpha)
+        #     bond_corr_length (beta)
+        #     bond_corr_neighbor (gamma)
+        #     optional: mol_corr (k)
         # where atom_corr are the atomic corrections, bond_corr_length are the bondwise corrections
         # due to bond lengths (bounded by 0 below), bond_corr_neighbor are the bondwise corrections
         # due to neighboring atoms, and mol_corr (optional) is a molecular correction.
+
+        # Choose reasonable bounds depending on the parameter
+        lim_alpha = (-5.0, 5.0)
+        lim_beta = (0.0, 1e4)
+        lim_gamma = (-1.0, 1.0)
+        lim_k = (-10.0, 10.0)
+
+        # Specify initial guess and set bounds
+        w_alpha = np.random.uniform(lim_alpha[0] / 10, lim_alpha[1] / 10, nelements)
+        w_beta = np.exp(np.random.uniform(-5, np.log(lim_beta[1]) - 1, nelements))
+        w_gamma = np.random.uniform(lim_gamma[0] / 10, lim_gamma[1] / 10, nelements)
+        w = np.concatenate((w_alpha, w_beta, w_gamma))
+        wmin = [lim_alpha[0]] * nelements + [lim_beta[0]] * nelements + [lim_gamma[0]] * nelements
+        wmax = [lim_alpha[1]] * nelements + [lim_beta[1]] * nelements + [lim_gamma[1]] * nelements
         if fit_mol_corr:
-            w0 = np.zeros(3 * nelements + 1) + 1e-6
-            wmin = [low] * nelements + [0] * nelements + [low] * nelements + [low]
-            wmax = [high] * (3 * nelements + 1)
-        else:
-            w0 = np.zeros(3 * nelements) + 1e-6
-            wmin = [low] * nelements + [0] * nelements + [low] * nelements
-            wmax = [high] * 3 * nelements
+            w_k = np.array([0.0])
+            w = np.concatenate((w, w_k))
+            wmin.append(lim_k[0])
+            wmax.append(lim_k[1])
+        w = np.array(w)
         bounds = [(lo, hi) for lo, hi in zip(wmin, wmax)]
 
         class RandomDisplacementBounds:
-            """Random displacement with bounds"""
-            def __init__(self, stepsize: float = 0.5):
+            """Unequal random displacement with bounds"""
+            def __init__(self):
                 self.xmin = wmin
                 self.xmax = wmax
-                self.stepsize = stepsize
+
+                # Step sizes should be comparable to separation between local minima
+                self.step_alpha = 0.1
+                self.step_beta = 10.0  # multiplicative
+                self.step_gamma = 0.01
+                self.step_k = 0.1
 
             def __call__(self, x: np.ndarray) -> np.ndarray:
                 """Take a random step but ensure the new position is within the bounds"""
+                alpha = x[:nelements]
+                beta = x[nelements:2*nelements]
+                gamma = x[2*nelements:3*nelements]
                 while True:
-                    xnew = x + np.random.uniform(-self.stepsize, self.stepsize, np.shape(x))
+                    x_alpha = alpha + np.random.uniform(-self.step_alpha, self.step_alpha, nelements)
+                    x_beta = beta * np.random.uniform(1 / self.step_beta, self.step_beta, nelements)
+                    # x_beta = beta + np.random.uniform(-self.step_beta, self.step_beta, nelements)
+                    x_gamma = gamma + np.random.uniform(-self.step_gamma, self.step_gamma, nelements)
+                    xnew = np.concatenate((x_alpha, x_beta, x_gamma))
+                    if fit_mol_corr:
+                        x_k = x[3*nelements] + np.random.uniform(-self.step_k, self.step_k, 1)
+                        xnew = np.concatenate((xnew, x_k))
                     if np.all(xnew < self.xmax) and np.all(xnew > self.xmin):
                         break
                 return xnew
 
         def get_params(_w: np.ndarray) -> Dict[str, Union[float, Dict[str, float]]]:
             _atom_corr = dict(zip(all_atom_symbols, _w[:nelements]))
-            _bond_corr_length = dict(zip(all_atom_symbols, _w[nelements:2 * nelements]))
-            _bond_corr_neighbor = dict(zip(all_atom_symbols, _w[2 * nelements:3 * nelements]))
-            _mol_corr = _w[3 * nelements] if fit_mol_corr else 0.0
+            _bond_corr_length = dict(zip(all_atom_symbols, _w[nelements:2*nelements]))
+            _bond_corr_neighbor = dict(zip(all_atom_symbols, _w[2*nelements:3*nelements]))
+            _mol_corr = _w[3*nelements] if fit_mol_corr else 0.0
             return dict(
                 atom_corr=_atom_corr,
                 bond_corr_length=_bond_corr_length,
@@ -554,21 +583,30 @@ class BAC:
             )
             return self.calc_data - corr  # Need negative sign here
 
+        def residuals(_w: np.ndarray) -> Union[float, np.ndarray]:
+            """Calculate residuals"""
+            bac_data = get_bac_data(_w)
+            return self.ref_data - bac_data
+
         def objfun(_w: np.ndarray) -> Union[float, np.ndarray]:
             """Least-squares objective function"""
-            bac_data = get_bac_data(_w)
-            diff = self.ref_data - bac_data
+            diff = residuals(_w)
             return np.dot(diff, diff) / len(self.ref_data)
 
-        # SLSQP minimization is a little faster
-        minimizer_kwargs = dict(method='SLSQP', bounds=bounds, options={'disp': True, 'maxiter': minimizer_maxiter})
         if global_opt:
+            temperature = 0.1  # Should be comparable to separation between local minima (in function value)
             take_step = RandomDisplacementBounds()
-            res = optimize.basinhopping(
-                objfun, w0, niter=global_opt_iter, minimizer_kwargs=minimizer_kwargs, take_step=take_step, disp=True
-            )
-        else:
-            res = optimize.minimize(objfun, w0, **minimizer_kwargs)
+            minimizer_kwargs = dict(
+                method='SLSQP',  # SLSQP minimization is a little faster
+                bounds=bounds,
+                options={'disp': True, 'maxiter': minimizer_maxiter})
+            w = optimize.basinhopping(
+                objfun, w, niter=global_opt_iter, T=temperature,# take_step=take_step,
+                minimizer_kwargs=minimizer_kwargs, disp=True, niter_success=10,
+            ).x
+
+        # Run local opt after global opt to be sure of minimum and get Jacobian estimate
+        res = optimize.least_squares(residuals, w, jac='3-point', bounds=(wmin, wmax), max_nfev=500, verbose=1)
         w = res.x
 
         # Estimate parameter covariance matrix using Jacobian
