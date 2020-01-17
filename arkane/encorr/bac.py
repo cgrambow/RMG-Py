@@ -513,112 +513,184 @@ class BAC:
         # due to bond lengths (bounded by 0 below), bond_corr_neighbor are the bondwise corrections
         # due to neighboring atoms, and mol_corr (optional) is a molecular correction.
 
-        # Choose reasonable bounds depending on the parameter
-        lim_alpha = (-5.0, 5.0)
-        lim_beta = (0.0, 1e4)
-        lim_gamma = (-1.0, 1.0)
-        lim_k = (-10.0, 10.0)
+        def get_features(mol: Molecule, multiplicity: int = 1) -> Dict[str, Union[int, float]]:
+            """Given a molecule, extract the coefficients for a Melius-type fit"""
+            _features = defaultdict(float)
+            _features.update({f'a{s}': c for s, c in self._get_atom_counts(mol).items()})
+            _features.update({f'b{s[0]}{s[1]}' if isinstance(s, tuple) else f'b{s}': c
+                              for s, c in self._get_length_coeffs(mol).items()})
+            _features.update({f'g{s}': c for s, c in self._get_neighbor_coeffs(mol).items()})
+            if fit_mol_corr:
+                _features.update({'k': self._get_mol_coeff(mol, multiplicity=multiplicity)})
+            return _features
 
-        # Specify initial guess and set bounds
-        w_alpha = np.random.uniform(lim_alpha[0] / 10, lim_alpha[1] / 10, nelements)
-        w_beta = np.exp(np.random.uniform(-5, np.log(lim_beta[1]) - 1, nelements))
-        w_gamma = np.random.uniform(lim_gamma[0] / 10, lim_gamma[1] / 10, nelements)
-        w = np.concatenate((w_alpha, w_beta, w_gamma))
-        wmin = [lim_alpha[0]] * nelements + [lim_beta[0]] * nelements + [lim_gamma[0]] * nelements
-        wmax = [lim_alpha[1]] * nelements + [lim_beta[1]] * nelements + [lim_gamma[1]] * nelements
+        features = [get_features(mol, multiplicity=spc.multiplicity) for mol, spc in zip(mols, self.species)]
+        feature_keys_alpha = [f'a{s}' for s in all_atom_symbols]
+        bounds_alpha_lower = [-np.inf] * len(feature_keys_alpha)
+        bounds_alpha_upper = [np.inf] * len(feature_keys_alpha)
+
+        feature_keys_beta = [f'b{s}' for s in all_atom_symbols]
+        all_bond_types = {tuple(sorted([bond.atom1.element.symbol, bond.atom2.element.symbol]))
+                          for mol in mols for bond in mol.get_all_edges()}
+        feature_keys_beta_pairs = set()
+        for symbol1 in all_atom_symbols:
+            for symbol2 in all_atom_symbols:
+                if symbol1 != symbol2:
+                    symbols = tuple(sorted([symbol1, symbol2]))
+                    if symbols in all_bond_types:
+                        feature_keys_beta_pairs.add(f'b{symbols[0]}{symbols[1]}')
+        feature_keys_beta += sorted(feature_keys_beta_pairs)
+        bounds_beta_lower = [0] * len(feature_keys_beta)
+        bounds_beta_upper = [np.inf] * len(feature_keys_beta)
+
+        feature_keys_gamma = [f'g{s}' for s in all_atom_symbols]
+        bounds_gamma_lower = [-np.inf] * len(feature_keys_gamma)
+        bounds_gamma_upper = [np.inf] * len(feature_keys_gamma)
+
+        feature_keys = feature_keys_alpha + feature_keys_beta + feature_keys_gamma
+        bounds_lower = bounds_alpha_lower + bounds_beta_lower + bounds_gamma_lower
+        bounds_upper = bounds_alpha_upper + bounds_beta_upper + bounds_gamma_upper
         if fit_mol_corr:
-            w_k = np.array([0.0])
-            w = np.concatenate((w, w_k))
-            wmin.append(lim_k[0])
-            wmax.append(lim_k[1])
-        w = np.array(w)
-        bounds = [(lo, hi) for lo, hi in zip(wmin, wmax)]
+            feature_keys += ['k']
 
-        class RandomDisplacementBounds:
-            """Unequal random displacement with bounds"""
-            def __init__(self):
-                self.xmin = wmin
-                self.xmax = wmax
+        def make_feature_mat(_features: List[Dict[str, Union[int, float]]]) -> np.ndarray:
+            _x = np.zeros((len(_features), len(feature_keys)))
+            for idx, f in enumerate(_features):
+                flist = [f[s] for s in feature_keys]
+                _x[idx] = np.array(flist)
+            return _x
 
-                # Step sizes should be comparable to separation between local minima
-                self.step_alpha = 0.1
-                self.step_beta = 10.0  # multiplicative
-                self.step_gamma = 0.01
-                self.step_k = 0.1
+        def lin_reg(_x: np.ndarray, _y: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+            _w = np.linalg.solve(np.dot(_x.T, _x), np.dot(_x.T, _y))
+            _ypred = np.dot(_x, _w)
+            return _w, _ypred
 
-            def __call__(self, x: np.ndarray) -> np.ndarray:
-                """Take a random step but ensure the new position is within the bounds"""
-                alpha = x[:nelements]
-                beta = x[nelements:2*nelements]
-                gamma = x[2*nelements:3*nelements]
-                while True:
-                    x_alpha = alpha + np.random.uniform(-self.step_alpha, self.step_alpha, nelements)
-                    x_beta = beta * np.random.uniform(1 / self.step_beta, self.step_beta, nelements)
-                    # x_beta = beta + np.random.uniform(-self.step_beta, self.step_beta, nelements)
-                    x_gamma = gamma + np.random.uniform(-self.step_gamma, self.step_gamma, nelements)
-                    xnew = np.concatenate((x_alpha, x_beta, x_gamma))
-                    if fit_mol_corr:
-                        x_k = x[3*nelements] + np.random.uniform(-self.step_k, self.step_k, 1)
-                        xnew = np.concatenate((xnew, x_k))
-                    if np.all(xnew < self.xmax) and np.all(xnew > self.xmin):
-                        break
-                return xnew
+        x = make_feature_mat(features)
+        y = self.ref_data - self.calc_data
+        # w, ypred = lin_reg(x, y)
+        w = optimize.lsq_linear(x, y, bounds=(bounds_lower, bounds_upper), verbose=2).x
 
-        def get_params(_w: np.ndarray) -> Dict[str, Union[float, Dict[str, float]]]:
-            _atom_corr = dict(zip(all_atom_symbols, _w[:nelements]))
-            _bond_corr_length = dict(zip(all_atom_symbols, _w[nelements:2*nelements]))
-            _bond_corr_neighbor = dict(zip(all_atom_symbols, _w[2*nelements:3*nelements]))
-            _mol_corr = _w[3*nelements] if fit_mol_corr else 0.0
-            return dict(
-                atom_corr=_atom_corr,
-                bond_corr_length=_bond_corr_length,
-                bond_corr_neighbor=_bond_corr_neighbor,
-                mol_corr=_mol_corr
-            )
+        covariance_unscaled = np.linalg.inv(x.T @ x)
+        self.correlation = _covariance_to_correlation(covariance_unscaled)
 
-        def get_bac_data(_w: np.ndarray) -> np.ndarray:
-            corr = np.array(
-                [self._get_melius_correction(mol=mol, multiplicity=spc.multiplicity, params=get_params(_w)) / 4184.0
-                 for mol, spc in zip(mols, self.species)]
-            )
-            return self.calc_data - corr  # Need negative sign here
+        _atom_corr = dict(zip(all_atom_symbols, w[:nelements]))
+        _bond_corr_length = dict(zip(all_atom_symbols, w[nelements:2*nelements]))
+        _bond_corr_neighbor = dict(zip(all_atom_symbols, w[-nelements:]))
+        self.bacs = dict(
+            atom_corr=_atom_corr,
+            bond_corr_length=_bond_corr_length,
+            bond_corr_neighbor=_bond_corr_neighbor,
+        )
+        corr = np.array([self._get_melius_correction(mol=mol, multiplicity=spc.multiplicity) / 4184.0
+                        for mol, spc in zip(mols, self.species)])
+        self.bac_data = self.calc_data - corr
 
-        def residuals(_w: np.ndarray) -> Union[float, np.ndarray]:
-            """Calculate residuals"""
-            bac_data = get_bac_data(_w)
-            return self.ref_data - bac_data
-
-        def objfun(_w: np.ndarray) -> Union[float, np.ndarray]:
-            """Least-squares objective function"""
-            diff = residuals(_w)
-            return np.dot(diff, diff) / len(self.ref_data)
-
-        if global_opt:
-            temperature = 0.1  # Should be comparable to separation between local minima (in function value)
-            take_step = RandomDisplacementBounds()
-            minimizer_kwargs = dict(
-                method='SLSQP',  # SLSQP minimization is a little faster
-                bounds=bounds,
-                options={'disp': True, 'maxiter': minimizer_maxiter})
-            w = optimize.basinhopping(
-                objfun, w, niter=global_opt_iter, T=temperature,# take_step=take_step,
-                minimizer_kwargs=minimizer_kwargs, disp=True, niter_success=10,
-            ).x
-
-        # Run local opt after global opt to be sure of minimum and get Jacobian estimate
-        res = optimize.least_squares(residuals, w, jac='3-point', bounds=(wmin, wmax), max_nfev=500, verbose=1)
-        w = res.x
-
-        # Estimate parameter covariance matrix using Jacobian
-        _, s, vT = svd(res.jac, full_matrices=False)
-        thresh = np.finfo(float).eps * max(res.jac.shape) * s[0]
-        s = s[s > thresh]
-        vT = vT[:s.size]
-        covariance = (vT.T / s ** 2) @ vT
-        self.correlation = _covariance_to_correlation(covariance)
-
-        self.bac_data = get_bac_data(w)
-        self.bacs = get_params(w)
+        # # Choose reasonable bounds depending on the parameter
+        # lim_alpha = (-5.0, 5.0)
+        # lim_beta = (0.0, 1e4)
+        # lim_gamma = (-1.0, 1.0)
+        # lim_k = (-10.0, 10.0)
+        #
+        # # Specify initial guess and set bounds
+        # w_alpha = np.random.uniform(lim_alpha[0] / 10, lim_alpha[1] / 10, nelements)
+        # w_beta = np.exp(np.random.uniform(-5, np.log(lim_beta[1]) - 1, nelements))
+        # w_gamma = np.random.uniform(lim_gamma[0] / 10, lim_gamma[1] / 10, nelements)
+        # w = np.concatenate((w_alpha, w_beta, w_gamma))
+        # wmin = [lim_alpha[0]] * nelements + [lim_beta[0]] * nelements + [lim_gamma[0]] * nelements
+        # wmax = [lim_alpha[1]] * nelements + [lim_beta[1]] * nelements + [lim_gamma[1]] * nelements
+        # if fit_mol_corr:
+        #     w_k = np.array([0.0])
+        #     w = np.concatenate((w, w_k))
+        #     wmin.append(lim_k[0])
+        #     wmax.append(lim_k[1])
+        # w = np.array(w)
+        # bounds = [(lo, hi) for lo, hi in zip(wmin, wmax)]
+        #
+        # class RandomDisplacementBounds:
+        #     """Unequal random displacement with bounds"""
+        #     def __init__(self):
+        #         self.xmin = wmin
+        #         self.xmax = wmax
+        #
+        #         # Step sizes should be comparable to separation between local minima
+        #         self.step_alpha = 0.1
+        #         self.step_beta = 10.0  # multiplicative
+        #         self.step_gamma = 0.01
+        #         self.step_k = 0.1
+        #
+        #     def __call__(self, x: np.ndarray) -> np.ndarray:
+        #         """Take a random step but ensure the new position is within the bounds"""
+        #         alpha = x[:nelements]
+        #         beta = x[nelements:2*nelements]
+        #         gamma = x[2*nelements:3*nelements]
+        #         while True:
+        #             x_alpha = alpha + np.random.uniform(-self.step_alpha, self.step_alpha, nelements)
+        #             x_beta = beta * np.random.uniform(1 / self.step_beta, self.step_beta, nelements)
+        #             # x_beta = beta + np.random.uniform(-self.step_beta, self.step_beta, nelements)
+        #             x_gamma = gamma + np.random.uniform(-self.step_gamma, self.step_gamma, nelements)
+        #             xnew = np.concatenate((x_alpha, x_beta, x_gamma))
+        #             if fit_mol_corr:
+        #                 x_k = x[3*nelements] + np.random.uniform(-self.step_k, self.step_k, 1)
+        #                 xnew = np.concatenate((xnew, x_k))
+        #             if np.all(xnew < self.xmax) and np.all(xnew > self.xmin):
+        #                 break
+        #         return xnew
+        #
+        # def get_params(_w: np.ndarray) -> Dict[str, Union[float, Dict[str, float]]]:
+        #     _atom_corr = dict(zip(all_atom_symbols, _w[:nelements]))
+        #     _bond_corr_length = dict(zip(all_atom_symbols, _w[nelements:2*nelements]))
+        #     _bond_corr_neighbor = dict(zip(all_atom_symbols, _w[2*nelements:3*nelements]))
+        #     _mol_corr = _w[3*nelements] if fit_mol_corr else 0.0
+        #     return dict(
+        #         atom_corr=_atom_corr,
+        #         bond_corr_length=_bond_corr_length,
+        #         bond_corr_neighbor=_bond_corr_neighbor,
+        #         mol_corr=_mol_corr
+        #     )
+        #
+        # def get_bac_data(_w: np.ndarray) -> np.ndarray:
+        #     corr = np.array(
+        #         [self._get_melius_correction(mol=mol, multiplicity=spc.multiplicity, params=get_params(_w)) / 4184.0
+        #          for mol, spc in zip(mols, self.species)]
+        #     )
+        #     return self.calc_data - corr  # Need negative sign here
+        #
+        # def residuals(_w: np.ndarray) -> Union[float, np.ndarray]:
+        #     """Calculate residuals"""
+        #     bac_data = get_bac_data(_w)
+        #     return self.ref_data - bac_data
+        #
+        # def objfun(_w: np.ndarray) -> Union[float, np.ndarray]:
+        #     """Least-squares objective function"""
+        #     diff = residuals(_w)
+        #     return np.dot(diff, diff) / len(self.ref_data)
+        #
+        # if global_opt:
+        #     temperature = 0.1  # Should be comparable to separation between local minima (in function value)
+        #     take_step = RandomDisplacementBounds()
+        #     minimizer_kwargs = dict(
+        #         method='SLSQP',  # SLSQP minimization is a little faster
+        #         bounds=bounds,
+        #         options={'disp': True, 'maxiter': minimizer_maxiter})
+        #     w = optimize.basinhopping(
+        #         objfun, w, niter=global_opt_iter, T=temperature,# take_step=take_step,
+        #         minimizer_kwargs=minimizer_kwargs, disp=True, niter_success=10,
+        #     ).x
+        #
+        # # Run local opt after global opt to be sure of minimum and get Jacobian estimate
+        # res = optimize.least_squares(residuals, w, jac='3-point', bounds=(wmin, wmax), max_nfev=500, verbose=1)
+        # w = res.x
+        #
+        # # Estimate parameter covariance matrix using Jacobian
+        # _, s, vT = svd(res.jac, full_matrices=False)
+        # thresh = np.finfo(float).eps * max(res.jac.shape) * s[0]
+        # s = s[s > thresh]
+        # vT = vT[:s.size]
+        # covariance = (vT.T / s ** 2) @ vT
+        # self.correlation = _covariance_to_correlation(covariance)
+        #
+        # self.bac_data = get_bac_data(w)
+        # self.bacs = get_params(w)
 
     def calculate_stats(self, calc_data: np.ndarray) -> 'Stats':
         """
