@@ -59,7 +59,7 @@ class BAC:
         'H': 0.5, 'C': 1.0, 'N': 1.5, 'O': 1.0, 'F': 0.5,
         'Si': 1.0, 'P': 1.5, 'S': 1.0, 'Cl': 0.5, 'Br': 0.5, 'I': 0.5
     }
-    alpha = 3.0  # Melius-type parameter (Angstrom^-1)
+    exp_coeff = 3.0  # Melius-type parameter (Angstrom^-1)
 
     def __init__(self, model_chemistry, bac_type='p'):
         self._model_chemistry = self._bac_type = None  # Set these first to avoid errors in setters
@@ -212,7 +212,7 @@ class BAC:
             # Bond length correction
             length_corr = (bond_corr_length[symbol1] * bond_corr_length[symbol2]) ** 0.5
             length = np.linalg.norm(atom1.coords - atom2.coords)
-            bac_bond += length_corr * np.exp(-self.alpha * length)
+            bac_bond += length_corr * np.exp(-self.exp_coeff * length)
 
             # Neighbor correction
             for other_atom, other_bond in mol.get_bonds(atom1).items():  # Atoms adjacent to atom1
