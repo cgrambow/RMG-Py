@@ -54,6 +54,7 @@ from rmgpy import settings
 
 import arkane.encorr.data as data
 from arkane.encorr.data import Molecule, BACDatapoint, extract_dataset, geo_to_mol
+from arkane.encorr.decomp import get_substructs
 from arkane.exceptions import BondAdditivityCorrectionError
 from arkane.reference import ReferenceSpecies, ReferenceDatabase
 
@@ -219,6 +220,8 @@ class BAC:
         # Attributes related to fitting BACs for a given model chemistry
         self.database_key = None  # Dictionary key to access reference database
         self.dataset = None  # Collection of BACDatapoints in BACDataset
+        self.substructs = None  # Substructure counts for each molecule
+        self.all_substructs = None  # Substructure counts across all molecules in reference data
         self.correlation = None  # Correlation matrix for BAC parameters
 
         # Define attributes for memoization during fitting
@@ -729,6 +732,43 @@ class BAC:
 
         self.dataset.bac_data = get_bac_data(w)
         self.bacs = get_params(w)
+
+    def _compute_weights(self):
+        """
+        Set weights for each molecule such that molecular diversity is
+        maximized. I.e., effectively balance dataset by having higher
+        weights for molecules with underrepresented substructures.
+        """
+        # List of substructure counts for each molecule
+        self.substructs = [get_substructs(d.spc.smiles) for d in self.dataset]
+
+        # Add keys for charge and multiplicity
+        for d, substructs in zip(self.dataset, self.substructs):
+            if d.spc.charge == 0:
+                substructs['neutral'] = 1
+            elif d.spc.charge > 0:
+                substructs['cation'] = 1
+            elif d.spc.charge < 0:
+                substructs['anion'] = 1
+
+            if d.spc.multiplicity == 1:
+                substructs['singlet'] = 1
+            elif d.spc.multiplicity == 2:
+                substructs['doublet'] = 1
+            elif d.spc.multiplicity >= 3:
+                substructs['triplet+'] = 1
+
+        # Counts of substructures across all molecules
+        self.all_substructs = Counter()
+        for s in self.substructs:
+            self.all_substructs += s
+
+        # Compute weight for each molecule as average across substructure frequencies
+        self.dataset.weight = [
+            sum(1 / self.all_substructs[s] for s in substructs.elements())  # Sum of frequencies
+            / sum(substructs.values())  # Divide by number of substructures in molecule
+            for substructs in self.substructs  # For each molecule
+        ]
 
     def write_to_database(self, overwrite: bool = False, alternate_path: str = None):
         """
