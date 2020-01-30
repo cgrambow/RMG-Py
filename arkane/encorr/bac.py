@@ -49,6 +49,8 @@ from typing import Dict, Iterable, List, Tuple, Union
 
 import numpy as np
 import scipy.optimize as optimize
+from rdkit import Chem, DataStructs
+from rdkit.Chem import AllChem
 
 from rmgpy import settings
 
@@ -737,42 +739,62 @@ class BAC:
         self.dataset.bac_data = get_bac_data(w)
         self.bacs = get_params(w)
 
-    def _compute_weights(self):
+    def _compute_weights(self, weight_type: str = 'substructs'):
         """
         Set weights for each molecule such that molecular diversity is
         maximized. I.e., effectively balance dataset by having higher
         weights for molecules with underrepresented substructures.
+
+        Args:
+            weight_type: 'substructs' or 'fingerprints'.
         """
-        # List of substructure counts for each molecule
-        self.substructs = [get_substructs(d.spc.smiles) for d in self.dataset]
+        if weight_type == 'substructs':
+            # List of substructure counts for each molecule
+            self.substructs = [get_substructs(d.spc.smiles) for d in self.dataset]
 
-        # Add keys for charge and multiplicity
-        for d, substructs in zip(self.dataset, self.substructs):
-            if d.spc.charge == 0:
-                substructs['neutral'] = 1
-            elif d.spc.charge > 0:
-                substructs['cation'] = 1
-            elif d.spc.charge < 0:
-                substructs['anion'] = 1
+            # Add keys for charge and multiplicity
+            for d, substructs in zip(self.dataset, self.substructs):
+                if d.spc.charge == 0:
+                    substructs['neutral'] = 1
+                elif d.spc.charge > 0:
+                    substructs['cation'] = 1
+                elif d.spc.charge < 0:
+                    substructs['anion'] = 1
 
-            if d.spc.multiplicity == 1:
-                substructs['singlet'] = 1
-            elif d.spc.multiplicity == 2:
-                substructs['doublet'] = 1
-            elif d.spc.multiplicity >= 3:
-                substructs['triplet+'] = 1
+                if d.spc.multiplicity == 1:
+                    substructs['singlet'] = 1
+                elif d.spc.multiplicity == 2:
+                    substructs['doublet'] = 1
+                elif d.spc.multiplicity >= 3:
+                    substructs['triplet+'] = 1
 
-        # Counts of substructures across all molecules
-        self.all_substructs = Counter()
-        for s in self.substructs:
-            self.all_substructs += s
+            # Counts of substructures across all molecules
+            self.all_substructs = Counter()
+            for s in self.substructs:
+                self.all_substructs += s
 
-        # Compute weight for each molecule as average across substructure frequencies
-        self.dataset.weight = [
-            sum(1 / self.all_substructs[s] for s in substructs.elements())  # Sum of frequencies
-            / sum(substructs.values())  # Divide by number of substructures in molecule
-            for substructs in self.substructs  # For each molecule
-        ]
+            # Compute weight for each molecule as average across substructure frequencies
+            self.dataset.weight = [
+                sum(1 / self.all_substructs[s] for s in substructs.elements())  # Sum of frequencies
+                / sum(substructs.values())  # Divide by number of substructures in molecule
+                for substructs in self.substructs  # For each molecule
+            ]
+        elif weight_type == 'fingerprints':
+            mols = [Chem.MolFromSmiles(d.spc.smiles) for d in self.dataset]
+            fps = [AllChem.GetMorganFingerprint(mol, 3) for mol in mols]  # Radius 3
+
+            # Compute pairwise similarities
+            similarities = np.zeros((len(fps), len(fps)))
+            for i in range(len(fps)):
+                for j in range(len(fps)):
+                    similarities[i, j] = DataStructs.TanimotoSimilarity(fps[i], fps[j])
+
+            nmols = similarities.shape[0]
+            similarities = similarities[~np.eye(nmols, dtype=bool)].reshape(nmols, -1)  # Remove diagonal
+            avg_dissim = 1 - np.mean(similarities, axis=1)  # Average dissimilarity for each molecule
+            self.dataset.weight = np.interp(avg_dissim, (avg_dissim.min(), avg_dissim.max()), (0, 10)) ** 2  # Scale
+        else:
+            raise NotImplementedError(f'{weight_type} weight type is unavailable')
 
     def write_to_database(self, overwrite: bool = False, alternate_path: str = None):
         """
